@@ -181,6 +181,26 @@
     font-family:'Archivo',sans-serif;font-size:13px;padding:12px;border-radius:var(--radius);cursor:pointer;
   }
 
+  .tabs{display:flex;gap:6px;margin-bottom:4px}
+  .tab{
+    flex:1;background:transparent;border:1px solid var(--line);color:var(--muted);
+    font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+    padding:9px 6px;border-radius:var(--radius);cursor:pointer;
+  }
+  .tab[aria-pressed="true"]{background:var(--alabaster);color:var(--teal);border-color:var(--alabaster)}
+  #modo-proy,#modo-suelta{display:flex;flex-direction:column;gap:8px}
+  .fases{display:flex;flex-direction:column;gap:2px;margin:2px 0}
+  .fases label{
+    display:flex;align-items:center;gap:9px;padding:7px 9px;cursor:pointer;
+    border:1px solid var(--line);border-radius:var(--radius);font-size:13px;
+  }
+  .fases label:has(input:checked){border-color:var(--muted);background:var(--teal-lift)}
+  .fases input{accent-color:var(--orange);width:15px;height:15px;flex:none}
+  .fases .e{
+    margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:9px;
+    letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  }
+
   .pie{display:flex;justify-content:center;align-items:center;gap:14px;margin-top:12px}
   .link{
     background:none;border:0;color:var(--muted);cursor:pointer;
@@ -244,24 +264,52 @@
 <section>
   <div class="titulo-sec"><span class="eyebrow">Lo que sigue</span><span class="eyebrow" id="quedan"></span></div>
   <div class="pista" id="pista"></div>
-  <button class="agregar" id="abrir">+ Agregar tarea</button>
+  <button class="agregar" id="abrir">+ Agregar</button>
   <div class="form" id="form" hidden>
-    <div class="fila">
-      <select id="f-proy"></select>
-      <input id="f-fase" placeholder="Fase (ej. Corte bruto)">
+
+    <div class="tabs">
+      <button id="tab-proy" class="tab" aria-pressed="true">Proyecto de video</button>
+      <button id="tab-suelta" class="tab" aria-pressed="false">Tarea suelta</button>
     </div>
-    <input id="f-nom" placeholder="¿Qué hay que hacer?">
-    <div class="fila">
-      <input id="f-min" type="number" inputmode="numeric" placeholder="Minutos" value="60">
-      <select id="f-energia">
-        <option value="alta">Energía alta</option>
-        <option value="baja">Energía baja</option>
-      </select>
+
+    <!-- proyecto de video: genera las fases solo -->
+    <div id="modo-proy">
+      <input id="p-nom" placeholder="Nombre del cliente o proyecto">
+      <div class="fila">
+        <input id="p-cant" type="number" inputmode="numeric" min="1" value="4" placeholder="¿Cuántos videos?">
+        <select id="p-estado">
+          <option value="editar">Ya grabados — solo editar</option>
+          <option value="cero">Desde cero — guion y rodaje</option>
+        </select>
+      </div>
+      <p class="nota">Se van a crear las fases una por una, para los <em id="p-eco">4</em> videos juntos. Nunca un video a la vez.</p>
+      <div id="p-fases" class="fases"></div>
+      <div class="fila">
+        <button class="crear" id="p-crear">Crear las fases</button>
+        <button class="cancelar" id="cancelar">Cancelar</button>
+      </div>
     </div>
-    <div class="fila">
-      <button class="crear" id="crear">Agregar a la cola</button>
-      <button class="cancelar" id="cancelar">Cancelar</button>
+
+    <!-- tarea suelta -->
+    <div id="modo-suelta" hidden>
+      <div class="fila">
+        <select id="f-proy"></select>
+        <input id="f-fase" placeholder="Fase (ej. Corte bruto)">
+      </div>
+      <input id="f-nom" placeholder="¿Qué hay que hacer?">
+      <div class="fila">
+        <input id="f-min" type="number" inputmode="numeric" placeholder="Minutos" value="60">
+        <select id="f-energia">
+          <option value="alta">Energía alta</option>
+          <option value="baja">Energía baja</option>
+        </select>
+      </div>
+      <div class="fila">
+        <button class="crear" id="crear">Agregar a la cola</button>
+        <button class="cancelar" id="cancelar2">Cancelar</button>
+      </div>
     </div>
+
   </div>
 </section>
 
@@ -311,6 +359,10 @@ const PROYECTOS = {
   crm:   {nombre:'CRM Passiflora',        color:'#A85C3B'}
 };
 
+// Une los proyectos de fábrica con los que crea Nicolás
+function todosProyectos(){ return {...PROYECTOS, ...(E.propios || {})}; }
+function proy(k){ return todosProyectos()[k] || {nombre:'Sin proyecto', color:'#5E7378'}; }
+
 const SEMILLA = [
   // --- Destrabar primero: lo que da plata y lo que es corto ---
   {p:'meta',   fase:'Analizar',   nom:'Revisar resultados de la pauta',   min:120, energia:'alta'},
@@ -356,6 +408,7 @@ let E = {
   racha: 0,
   ultimoDia: null,
   modo: 'normal',
+  propios: {},      // proyectos creados desde la app
   finBloque: null,  // hora en que termina el bloque (ms)
   pausado: null     // segundos guardados al pausar
 };
@@ -508,7 +561,7 @@ function pintar(){
       ? `<div class="vacio">No queda nada de baja energía.<br>Si te sentís con algo de fuerza, volvé a “Día normal” y armá un corte feo.</div>`
       : `<div class="vacio">Cola vacía. Cerraste todo.<br>Andá a descansar sin culpa.</div>`;
   } else {
-    const pr = PROYECTOS[t.p];
+    const pr = proy(t.p);
     const s = segsRestantes();
     const va = corriendo();
     zona.innerHTML = `
@@ -542,7 +595,7 @@ function pintar(){
   document.getElementById('quedan').textContent = cola.length ? cola.length+' en cola' : '';
   const pista = document.getElementById('pista');
   pista.innerHTML = cola.slice(0,12).map((c,i)=>{
-    const pr = PROYECTOS[c.p];
+    const pr = proy(c.p);
     return `<div class="clip ${i===0?'activo':''}" data-id="${c.id}" role="button" tabindex="0"
       style="border-top-color:${i===0?pr.color:'var(--muted)'}">
       <div class="fase">${c.fase}</div>
@@ -558,16 +611,17 @@ function pintar(){
   });
 
   // proyectos
-  document.getElementById('proyectos').innerHTML = Object.keys(PROYECTOS).map(k=>{
+  document.getElementById('proyectos').innerHTML = Object.keys(todosProyectos()).map(k=>{
     const ts = E.tareas.filter(t=>t.p===k);
+    if(!ts.length) return '';
     const d = ts.filter(t=>t.hecho).length;
     const pct = Math.round(d/ts.length*100);
     return `<div class="proy">
       <div class="proy-top">
-        <span>${PROYECTOS[k].nombre}</span>
+        <span>${proy(k).nombre}</span>
         <span class="cont">${d}/${ts.length} fases</span>
       </div>
-      <div class="barra"><i style="width:${pct}%;background:${PROYECTOS[k].color}"></i></div>
+      <div class="barra"><i style="width:${pct}%;background:${proy(k).color}"></i></div>
     </div>`;
   }).join('');
 
@@ -637,7 +691,7 @@ async function completar(id){
   const t = E.tareas.find(x=>x.id===id);
   t.hecho = true;
   const h = new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
-  E.log.unshift({txt:`${PROYECTOS[t.p].nombre} — ${t.nom}`, hora:h});
+  E.log.unshift({txt:`${proy(t.p).nombre} — ${t.nom}`, hora:h});
   if(E.ultimoDia !== hoy()){ E.racha++; E.ultimoDia = hoy(); }
   await guardar(); pintar();
 }
@@ -661,19 +715,112 @@ async function saltar(id){
   await guardar(); pintar();
 }
 
+// ---- Plantillas de fases ----
+// min = minutos por video. Se multiplican por la cantidad.
+const FASES = {
+  cero: [
+    {fase:'Guion',      nom:'Guionizar los {n}',                    min:22, energia:'alta'},
+    {fase:'Rodaje',     nom:'Grabar los {n} seguidos',              min:38, energia:'alta'},
+  ],
+  comun: [
+    {fase:'Material',   nom:'Organizar clips y marcar tomas de los {n}', min:11, energia:'baja'},
+    {fase:'Silencios',  nom:'Cortes de silencio de los {n}',             min:15, energia:'baja'},
+    {fase:'Corte bruto',nom:'Estructura de los {n}, sin adornos',        min:22, energia:'alta'},
+    {fase:'Acabado',    nom:'Color, animaciones y gráficos de los {n}',  min:38, energia:'alta'},
+    {fase:'Subtítulos', nom:'Subtítulos de los {n}',                     min:15, energia:'baja'},
+    {fase:'Música',     nom:'Música y mezcla de los {n}',                min:11, energia:'alta'},
+    {fase:'Entrega',    nom:'Exportar y entregar los {n}',               min:8,  energia:'baja'},
+  ]
+};
+
+const COLORES = ['#D36135','#C9A227','#6F8C5A','#4E86A0','#8A1B80','#A85C3B','#B0524E','#4F7C6E'];
+
+function plantilla(){
+  const cero = document.getElementById('p-estado').value === 'cero';
+  return (cero ? FASES.cero : []).concat(FASES.comun);
+}
+
+function pintarFases(){
+  const n = Math.max(1, parseInt(document.getElementById('p-cant').value) || 1);
+  document.getElementById('p-eco').textContent = n;
+  const marcadas = new Set(
+    [...document.querySelectorAll('#p-fases input:checked')].map(i=>i.value)
+  );
+  const primera = !document.querySelector('#p-fases input');
+  document.getElementById('p-fases').innerHTML = plantilla().map(f=>{
+    const on = primera || marcadas.has(f.fase);
+    const h = Math.round(f.min*n/60*10)/10;
+    return `<label>
+      <input type="checkbox" value="${f.fase}" ${on?'checked':''}>
+      <span>${f.fase} · ${h}h</span>
+      <span class="e">${f.energia}</span>
+    </label>`;
+  }).join('');
+}
+
+async function crearProyecto(){
+  const nombre = document.getElementById('p-nom').value.trim();
+  if(!nombre){ document.getElementById('p-nom').focus(); return; }
+  const n = Math.max(1, parseInt(document.getElementById('p-cant').value) || 1);
+  const elegidas = new Set([...document.querySelectorAll('#p-fases input:checked')].map(i=>i.value));
+  const fases = plantilla().filter(f => elegidas.has(f.fase));
+  if(!fases.length) return;
+
+  const k = 'x' + Date.now();
+  E.propios = E.propios || {};
+  E.propios[k] = {
+    nombre: `${nombre} (${n})`,
+    color: COLORES[Object.keys(E.propios).length % COLORES.length]
+  };
+
+  fases.forEach((f,i)=>{
+    E.tareas.push({
+      id: 'c' + Date.now() + '-' + i,
+      p: k,
+      fase: f.fase,
+      nom: f.nom.replace('{n}', n),
+      min: Math.round(f.min * n),
+      energia: f.energia,
+      hecho: false
+    });
+  });
+
+  document.getElementById('p-nom').value = '';
+  document.getElementById('form').hidden = true;
+  await guardar(); pintar();
+}
+
 document.getElementById('btn-normal').onclick = async()=>{ E.modo='normal'; pararReloj(); await guardar(); pintar(); };
 document.getElementById('btn-flojo').onclick  = async()=>{ E.modo='flojo';  pararReloj(); await guardar(); pintar(); };
 
-// ---- agregar tarea ----
+// ---- agregar ----
 const form = document.getElementById('form');
-document.getElementById('f-proy').innerHTML =
-  Object.keys(PROYECTOS).map(k=>`<option value="${k}">${PROYECTOS[k].nombre}</option>`).join('');
+const tabP = document.getElementById('tab-proy'), tabS = document.getElementById('tab-suelta');
+
+function verTab(esProy){
+  tabP.setAttribute('aria-pressed', esProy);
+  tabS.setAttribute('aria-pressed', !esProy);
+  document.getElementById('modo-proy').hidden = !esProy;
+  document.getElementById('modo-suelta').hidden = esProy;
+}
+tabP.onclick = ()=>verTab(true);
+tabS.onclick = ()=>verTab(false);
+
+document.getElementById('p-cant').oninput = pintarFases;
+document.getElementById('p-estado').onchange = pintarFases;
+document.getElementById('p-crear').onclick = crearProyecto;
+pintarFases();
 
 document.getElementById('abrir').onclick = ()=>{
   form.hidden = !form.hidden;
-  if(!form.hidden) document.getElementById('f-nom').focus();
+  if(!form.hidden){
+    document.getElementById('f-proy').innerHTML =
+      Object.keys(todosProyectos()).map(k=>`<option value="${k}">${todosProyectos()[k].nombre}</option>`).join('');
+    document.getElementById('p-nom').focus();
+  }
 };
-document.getElementById('cancelar').onclick = ()=>{ form.hidden = true; };
+document.getElementById('cancelar').onclick  = ()=>{ form.hidden = true; };
+document.getElementById('cancelar2').onclick = ()=>{ form.hidden = true; };
 
 document.getElementById('crear').onclick = async()=>{
   const nom = document.getElementById('f-nom').value.trim();
