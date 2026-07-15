@@ -221,6 +221,8 @@
     letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
   }
 
+  .io{display:flex;gap:14px;justify-content:center;margin-top:8px}
+
   .pie{display:flex;justify-content:center;align-items:center;gap:14px;margin-top:12px}
   .link{
     background:none;border:0;color:var(--muted);cursor:pointer;
@@ -291,6 +293,10 @@
 
 <section class="sec-agregar">
   <button class="agregar" id="abrir">+ Agregar</button>
+  <div class="io">
+    <button class="link" id="exportar">Exportar cola</button>
+    <button class="link" id="importar">Importar cola</button>
+  </div>
   <div class="form" id="form" hidden>
 
     <div class="tabs">
@@ -864,7 +870,80 @@ document.getElementById('crear').onclick = async()=>{
   await guardar(); pintar();
 };
 
-// ---- panel de sincronización ----
+// ---- exportar / importar ----
+// Formato de texto plano, una tarea por línea:
+//   PROYECTO | FASE | tarea | minutos | energia | estado
+function exportarTexto(){
+  const nombreP = k => proy(k).nombre;
+  const lineas = E.tareas.map(t =>
+    [nombreP(t.p), t.fase, t.nom, t.min, t.energia, t.hecho ? 'hecho' : 'pendiente'].join(' | ')
+  );
+  const cab = '# Sala de edición — cola exportada ' + new Date().toLocaleDateString('es-CO') +
+    '\n# formato: PROYECTO | FASE | tarea | minutos | energia(alta/baja) | estado(hecho/pendiente)\n';
+  return cab + lineas.join('\n');
+}
+
+async function importarTexto(txt){
+  const filas = txt.split('\n')
+    .map(l => l.trim())
+    .filter(l => l && !l.startsWith('#'));
+  if(!filas.length) return {ok:false, msg:'No encontré tareas en el texto.'};
+
+  // reconstruir proyectos por nombre
+  const porNombre = {};
+  Object.entries(todosProyectos()).forEach(([k,v]) => porNombre[v.nombre.toLowerCase()] = k);
+  E.propios = E.propios || {};
+
+  const nuevas = [];
+  let i = 0;
+  for(const fila of filas){
+    const p = fila.split('|').map(s => s.trim());
+    if(p.length < 3) continue;
+    const [nomProy, fase, nom, min, energia, estado] = p;
+
+    let clave = porNombre[nomProy.toLowerCase()];
+    if(!clave){
+      clave = 'x' + Date.now() + i;
+      const usados = Object.keys(E.propios).length + Object.keys(PROYECTOS).length;
+      E.propios[clave] = {nombre: nomProy, color: COLORES[usados % COLORES.length]};
+      porNombre[nomProy.toLowerCase()] = clave;
+    }
+    nuevas.push({
+      id: 'c' + Date.now() + '-' + (i++),
+      p: clave,
+      fase: fase || 'Suelta',
+      nom: nom || 'Sin nombre',
+      min: Math.max(5, parseInt(min) || 45),
+      energia: (energia === 'baja') ? 'baja' : 'alta',
+      hecho: (estado || '').toLowerCase().startsWith('hecho')
+    });
+  }
+  if(!nuevas.length) return {ok:false, msg:'No pude leer ninguna línea. Revisá el formato.'};
+
+  E.tareas = nuevas;
+  await guardar(); pintar();
+  return {ok:true, msg:`Listo. Cargué ${nuevas.length} tareas.`};
+}
+
+document.getElementById('exportar').onclick = async()=>{
+  const txt = exportarTexto();
+  try{
+    await navigator.clipboard.writeText(txt);
+    marcarGuardado('local');
+    document.getElementById('estado').textContent = 'Cola copiada — pegala en el chat';
+  }catch(e){
+    // si el navegador no deja copiar, la muestro para copiar a mano
+    prompt('Copiá todo este texto y pegámelo en el chat:', txt);
+  }
+};
+
+document.getElementById('importar').onclick = async()=>{
+  const txt = prompt('Pegá acá la cola que te di en el chat:');
+  if(txt == null) return;
+  const r = await importarTexto(txt);
+  document.getElementById('estado').textContent = r.msg;
+  document.getElementById('estado').style.color = r.ok ? 'var(--moss)' : 'var(--orange)';
+};
 const panel = document.getElementById('panel-sync');
 document.getElementById('s-url').value  = CFG.url  || '';
 document.getElementById('s-key').value  = CFG.key  || '';
