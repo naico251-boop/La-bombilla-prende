@@ -511,7 +511,9 @@ let E = {
   horasDia: {},     // {'AAAA-MM-DD': minutos trabajados ese día}
   libres: [],       // días marcados 'hoy no edito'
   reales: {},       // {fase: [min reales por video]} — para aprender
-  sabados: false    // ¿cuenta el sábado como día hábil?
+  sabados: false,   // ¿cuenta el sábado como día hábil?
+  pospuestas: [],   // ids que saltaste hoy
+  fijada: null      // id que elegiste a mano
 };
 
 let reloj = null;
@@ -726,6 +728,8 @@ function chequearDia(){
     if(E.ultimoDia !== ayer) E.racha = 0;   // se rompió la racha
     E.log = [];                              // el log es del día
     E.modo = 'normal';
+    E.pospuestas = [];                       // los saltos son del día
+    E.fijada = null;
   }
 }
 
@@ -733,21 +737,34 @@ function pendientes(){
   let l = E.tareas.filter(t=>!t.hecho);
   if(E.modo==='flojo') l = l.filter(t=>t.energia==='baja');
 
+  const pos = E.pospuestas || [];
+
   // Los proyectos con menos holgura empujan hacia adelante.
   // Sin fecha de entrega, se respeta el orden manual.
   const hol = {};
   Object.keys(todosProyectos()).forEach(k=>{ hol[k] = holgura(k); });
   const tieneFechas = Object.values(hol).some(v => v !== null);
-  if(!tieneFechas) return l;
 
-  return l.map((t,i)=>({t,i})).sort((a,b)=>{
-    const ha = hol[a.t.p], hb = hol[b.t.p];
-    if(ha === null && hb === null) return a.i - b.i;
-    if(ha === null) return 1;          // sin fecha, al final
-    if(hb === null) return -1;
-    if(ha !== hb) return ha - hb;      // menos holgura primero
-    return a.i - b.i;
-  }).map(x=>x.t);
+  if(tieneFechas){
+    l = l.map((t,i)=>({t,i})).sort((a,b)=>{
+      // lo que saltaste hoy se va abajo, sin importar la holgura
+      const pa = pos.includes(a.t.id) ? 1 : 0, pb = pos.includes(b.t.id) ? 1 : 0;
+      if(pa !== pb) return pa - pb;
+      const ha = hol[a.t.p], hb = hol[b.t.p];
+      if(ha === null && hb === null) return a.i - b.i;
+      if(ha === null) return 1;          // sin fecha, al final
+      if(hb === null) return -1;
+      if(ha !== hb) return ha - hb;      // menos holgura primero
+      return a.i - b.i;
+    }).map(x=>x.t);
+  }
+
+  // Lo que elegiste a mano manda sobre todo el cálculo
+  if(E.fijada){
+    const i = l.findIndex(t => t.id === E.fijada);
+    if(i > 0) l.unshift(l.splice(i,1)[0]);
+  }
+  return l;
 }
 
 function fmt(s){
@@ -991,6 +1008,8 @@ async function completar(id){
 
   pararReloj();
   t.hecho = true;
+  if(E.fijada === id) E.fijada = null;
+  E.pospuestas = (E.pospuestas || []).filter(x => x !== id);
   const h = new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
   E.log.unshift({txt:`${proy(t.p).nombre} — ${t.nom}`, hora:h});
   if(E.ultimoDia !== hoy()){ E.racha++; E.ultimoDia = hoy(); }
@@ -1001,15 +1020,16 @@ async function adelantar(id){
   const cola = pendientes();
   if(cola[0] && cola[0].id === id) return;   // ya es la actual
   pararReloj();
-  const i = E.tareas.findIndex(x=>x.id===id);
-  const [t] = E.tareas.splice(i,1);
-  E.tareas.unshift(t);
+  E.fijada = id;                              // tu elección manda
+  E.pospuestas = (E.pospuestas || []).filter(x => x !== id);
   await guardar(); pintar();
   window.scrollTo({top:0, behavior:'smooth'});
 }
 
 async function saltar(id){
   pararReloj();
+  E.pospuestas = (E.pospuestas || []).filter(x => x !== id).concat(id);
+  if(E.fijada === id) E.fijada = null;
   const i = E.tareas.findIndex(x=>x.id===id);
   const [t] = E.tareas.splice(i,1);
   E.tareas.push(t);
