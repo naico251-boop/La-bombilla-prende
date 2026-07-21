@@ -234,6 +234,58 @@
   .nota{font-size:12px;line-height:1.5;color:var(--muted)}
   .nota em{color:var(--alabaster);font-style:normal}
 
+  /* ---- panorama ---- */
+  .pano{
+    border:1px solid var(--line);border-left:3px solid var(--moss);
+    border-radius:var(--radius);padding:14px 16px;margin-bottom:20px;
+  }
+  .pano.corto{border-left-color:var(--orange)}
+  .pano .cifra{font-size:15px;line-height:1.45;margin-top:5px}
+  .pano .cifra b{font-family:'IBM Plex Mono',monospace;font-weight:500}
+  .pano .alerta{color:var(--orange)}
+  .pano .sug{font-size:13px;color:var(--muted);margin-top:8px;line-height:1.5}
+  .pano .aprende{
+    font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--muted);margin-top:9px;
+  }
+
+  /* ---- entregas ---- */
+  .ent{display:flex;align-items:center;gap:8px;margin-top:5px}
+  .ent input[type="date"]{
+    background:var(--teal-lift);border:1px solid var(--line);color:var(--alabaster);
+    font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 7px;
+    border-radius:var(--radius);color-scheme:dark;
+  }
+  .ent .hol{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.06em}
+  .ent .ok{color:var(--moss)} .ent .mal{color:var(--orange)}
+  .ent .ics{
+    background:none;border:0;color:var(--muted);cursor:pointer;padding:2px 4px;
+    font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.1em;
+    text-transform:uppercase;text-decoration:underline;text-underline-offset:2px;margin-left:auto;
+  }
+
+  /* ---- capacidad ---- */
+  .cap-fila{
+    display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+    padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;
+  }
+  .cap-fila b{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:14px;white-space:nowrap}
+  .cap-fila span{color:rgba(245,245,240,.75)}
+  .cap-fila.sub2{padding:5px 0 5px 12px;border-bottom-style:dotted;opacity:.72;font-size:12px}
+  .cap-fila.sub2 b{font-size:12px}
+  .cap-tit{
+    font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--muted);margin:16px 0 4px;
+  }
+  .cap-tit:first-child{margin-top:0}
+  .veredicto{
+    border:1px solid var(--line);border-left:3px solid var(--moss);
+    border-radius:var(--radius);padding:12px 14px;margin-top:14px;font-size:13px;line-height:1.5;
+  }
+  .veredicto.no{border-left-color:var(--orange)}
+  .veredicto b{font-family:'IBM Plex Mono',monospace;font-weight:500}
+  .veredicto .sub{color:var(--muted);font-size:12px;margin-top:6px;display:block}
+
   .vacio{
     border:1px dashed var(--line);border-radius:var(--radius);
     padding:22px 16px;text-align:center;color:var(--muted);font-size:13px;line-height:1.5;
@@ -276,7 +328,10 @@
 <div class="energia">
   <button id="btn-normal" aria-pressed="true">Día normal</button>
   <button id="btn-flojo" aria-pressed="false">Día flojo</button>
+  <button id="btn-libre" aria-pressed="false">Hoy no edito</button>
 </div>
+
+<div id="panorama"></div>
 
 <div class="columnas">
 <div class="col-izq">
@@ -336,6 +391,12 @@
           <option value="baja">Energía baja</option>
         </select>
       </div>
+      <select id="f-tipo">
+        <option value="edicion">Edición</option>
+        <option value="rodaje">Rodaje</option>
+        <option value="estrategia">Estrategia</option>
+        <option value="montaje">Montaje</option>
+      </select>
       <div class="fila">
         <button class="crear" id="crear">Agregar a la cola</button>
         <button class="cancelar" id="cancelar2">Cancelar</button>
@@ -349,6 +410,11 @@
 <section>
   <div class="titulo-sec"><span class="eyebrow">Render por proyecto</span></div>
   <div id="proyectos"></div>
+</section>
+
+<section>
+  <div class="titulo-sec"><span class="eyebrow">Capacidad</span></div>
+  <div id="capacidad"></div>
 </section>
 
 <section>
@@ -440,10 +506,110 @@ let E = {
   modo: 'normal',
   propios: {},      // proyectos creados desde la app
   finBloque: null,  // hora en que termina el bloque (ms)
-  pausado: null     // segundos guardados al pausar
+  pausado: null,    // segundos guardados al pausar
+  entregas: {},     // {claveProyecto: 'AAAA-MM-DD'}
+  horasDia: {},     // {'AAAA-MM-DD': minutos trabajados ese día}
+  libres: [],       // días marcados 'hoy no edito'
+  reales: {},       // {fase: [min reales por video]} — para aprender
+  sabados: false    // ¿cuenta el sábado como día hábil?
 };
 
 let reloj = null;
+
+// ---------- Motor de tiempo ----------
+const DIA = 86400000;
+const fechaTxt = d => d.toISOString().slice(0,10);
+
+// Capacidad diaria: arranca en 3h y la reemplaza el promedio real
+// de los días que sí trabajó (últimos 14), cuando ya hay 5 o más.
+function capacidadMin(){
+  const totalDia = m => (typeof m === 'number') ? m : Object.values(m).reduce((a,b)=>a+b,0);
+  const dias = Object.entries(E.horasDia)
+    .map(([d,m]) => [d, totalDia(m)])
+    .filter(([d,m]) => m >= 20 && !E.libres.includes(d))
+    .sort((a,b) => a[0] < b[0] ? 1 : -1)
+    .slice(0,14);
+  if(dias.length < 5) return {min:180, aprendida:false, muestras:dias.length};
+  const prom = dias.reduce((s,[,m]) => s+m, 0) / dias.length;
+  return {min: Math.round(prom), aprendida:true, muestras:dias.length};
+}
+
+function esHabil(d){
+  const dow = d.getDay();               // 0 dom, 6 sáb
+  if(dow === 0) return false;
+  if(dow === 6 && !E.sabados) return false;
+  return !E.libres.includes(fechaTxt(d));
+}
+
+// Minutos disponibles desde hoy hasta una fecha (inclusive)
+function minutosHasta(fechaISO){
+  if(!fechaISO) return null;
+  const cap = capacidadMin().min;
+  const fin = new Date(fechaISO + 'T23:59:59');
+  let total = 0, d = new Date();
+  d.setHours(0,0,0,0);
+  // hoy cuenta a medias si ya pasó medio día
+  for(let i=0; i<400 && d <= fin; i++){
+    if(esHabil(d)){
+      let m = cap;
+      if(i === 0){
+        const h = new Date().getHours();
+        m = Math.round(cap * Math.max(0, Math.min(1, (19 - h) / 9)));
+      }
+      total += m;
+    }
+    d = new Date(d.getTime() + DIA);
+  }
+  return total;
+}
+
+// Minutos de trabajo que faltan para un proyecto
+function faltaProyecto(k){
+  return E.tareas
+    .filter(t => t.p === k && !t.hecho)
+    .reduce((s,t) => s + estimado(t), 0);
+}
+
+// Estimación de una tarea, corregida con lo que de verdad tardó antes
+function estimado(t){
+  const r = E.reales[t.fase];
+  if(!r || r.length < 2) return t.min;
+  const factor = r.reduce((a,b)=>a+b,0) / r.length;
+  return Math.round(t.min * factor);
+}
+
+// Holgura: minutos disponibles menos minutos de trabajo. Negativo = no alcanza.
+function holgura(k){
+  const f = E.entregas[k];
+  if(!f) return null;
+  const disp = minutosHasta(f);
+  return disp - faltaProyecto(k);
+}
+
+function diasHasta(fechaISO){
+  const hoyD = new Date(); hoyD.setHours(0,0,0,0);
+  return Math.round((new Date(fechaISO+'T00:00:00') - hoyD) / DIA);
+}
+
+// Panorama global: ¿cabe todo lo prometido en el tiempo que queda?
+function panorama(){
+  const conFecha = Object.keys(todosProyectos())
+    .filter(k => E.entregas[k] && faltaProyecto(k) > 0);
+  if(!conFecha.length) return null;
+  const ultima = conFecha.map(k=>E.entregas[k]).sort().pop();
+  const trabajo = conFecha.reduce((s,k) => s + faltaProyecto(k), 0);
+  const disp = minutosHasta(ultima);
+  const apretados = conFecha
+    .map(k => ({k, h: holgura(k)}))
+    .filter(x => x.h < 0)
+    .sort((a,b) => a.h - b.h);
+  return {trabajo, disp, apretados, ultima, conFecha};
+}
+
+const hm = min => {
+  const h = Math.floor(Math.abs(min)/60), m = Math.round(Math.abs(min)%60);
+  return (min<0?'-':'') + (h ? h+'h' : '') + (m ? (h?' ':'')+m+'m' : (h?'':'0m'));
+};
 
 const hoy = () => new Date().toISOString().slice(0,10);
 
@@ -566,7 +732,22 @@ function chequearDia(){
 function pendientes(){
   let l = E.tareas.filter(t=>!t.hecho);
   if(E.modo==='flojo') l = l.filter(t=>t.energia==='baja');
-  return l;
+
+  // Los proyectos con menos holgura empujan hacia adelante.
+  // Sin fecha de entrega, se respeta el orden manual.
+  const hol = {};
+  Object.keys(todosProyectos()).forEach(k=>{ hol[k] = holgura(k); });
+  const tieneFechas = Object.values(hol).some(v => v !== null);
+  if(!tieneFechas) return l;
+
+  return l.map((t,i)=>({t,i})).sort((a,b)=>{
+    const ha = hol[a.t.p], hb = hol[b.t.p];
+    if(ha === null && hb === null) return a.i - b.i;
+    if(ha === null) return 1;          // sin fecha, al final
+    if(hb === null) return -1;
+    if(ha !== hb) return ha - hb;      // menos holgura primero
+    return a.i - b.i;
+  }).map(x=>x.t);
 }
 
 function fmt(s){
@@ -581,6 +762,8 @@ function pintar(){
   document.getElementById('racha').textContent = E.racha;
   document.getElementById('btn-normal').setAttribute('aria-pressed', E.modo==='normal');
   document.getElementById('btn-flojo').setAttribute('aria-pressed', E.modo==='flojo');
+  const libreHoy = E.libres.includes(hoy());
+  document.getElementById('btn-libre').setAttribute('aria-pressed', libreHoy);
 
   const cola = pendientes();
   const t = cola[0];
@@ -640,20 +823,83 @@ function pintar(){
     el.onkeydown = e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); ir(); } };
   });
 
+  // ---- panorama ----
+  const pz = document.getElementById('panorama');
+  const P = panorama();
+  const cap = capacidadMin();
+  if(!P){
+    pz.innerHTML = `<div class="pano">
+      <span class="eyebrow">Panorama</span>
+      <div class="cifra">Ponele fecha de entrega a tus proyectos (abajo, en Render por proyecto) y te digo si alcanzás.</div>
+    </div>`;
+  }else{
+    const dif = P.disp - P.trabajo;
+    const corto = dif < 0;
+    let sug = '';
+    if(corto){
+      const p = P.apretados[0];
+      sug = p
+        ? `El más apretado es <b>${proy(p.k).nombre}</b>. Opciones: mover su entrega, quitarle fases, o sumar horas.`
+        : `Revisá cuál proyecto podés mover.`;
+    }else if(dif < 240){
+      sug = 'Alcanzás, pero sin margen. Un imprevisto y quedás corto.';
+    }
+    pz.innerHTML = `<div class="pano ${corto?'corto':''}">
+      <span class="eyebrow">Panorama</span>
+      <div class="cifra">
+        Tenés <b>${hm(P.trabajo)}</b> de trabajo y <b>${hm(P.disp)}</b> disponibles hasta la última entrega.
+        ${corto ? `<span class="alerta">Vas corto ${hm(-dif)}.</span>` : `<span>Te sobran ${hm(dif)}.</span>`}
+      </div>
+      ${sug ? `<div class="sug">${sug}</div>` : ''}
+      <div class="aprende">${cap.aprendida
+        ? `Capacidad real medida: ${hm(cap.min)}/día · ${cap.muestras} días`
+        : `Usando 3h/día por ahora · faltan ${5-cap.muestras} días para medir tu ritmo real`}</div>
+    </div>`;
+  }
+
   // proyectos
   document.getElementById('proyectos').innerHTML = Object.keys(todosProyectos()).map(k=>{
     const ts = E.tareas.filter(t=>t.p===k);
     if(!ts.length) return '';
     const d = ts.filter(t=>t.hecho).length;
     const pct = Math.round(d/ts.length*100);
+    const falta = faltaProyecto(k);
+    const f = E.entregas[k] || '';
+    const h = holgura(k);
+    let est = '';
+    if(f && falta > 0){
+      const dd = diasHasta(f);
+      est = h >= 0
+        ? `<span class="hol ok">holgura ${hm(h)}</span>`
+        : `<span class="hol mal">falta ${hm(-h)}</span>`;
+      if(dd < 0) est = `<span class="hol mal">vencida</span>`;
+    }
     return `<div class="proy">
       <div class="proy-top">
         <span>${proy(k).nombre}</span>
-        <span class="cont">${d}/${ts.length} fases</span>
+        <span class="cont">${d}/${ts.length} fases${falta?' · '+hm(falta):''}</span>
       </div>
       <div class="barra"><i style="width:${pct}%;background:${proy(k).color}"></i></div>
+      <div class="ent">
+        <input type="date" value="${f}" data-k="${k}" class="fecha-ent">
+        ${est}
+        ${f ? `<button class="ics" data-ics="${k}">calendario</button>` : ''}
+      </div>
     </div>`;
   }).join('');
+
+  document.querySelectorAll('.fecha-ent').forEach(el=>{
+    el.onchange = async()=>{
+      if(el.value) E.entregas[el.dataset.k] = el.value;
+      else delete E.entregas[el.dataset.k];
+      await guardar(); pintar();
+    };
+  });
+  document.querySelectorAll('[data-ics]').forEach(el=>{
+    el.onclick = ()=>bajarICS(el.dataset.ics);
+  });
+
+  pintarCapacidad();
 
   // log
   document.getElementById('log').innerHTML = E.log.length
@@ -682,10 +928,24 @@ function tic(){
   const tc = document.getElementById('tc'), pg = document.getElementById('prog');
   if(tc) tc.textContent = fmt(s);
   if(pg) pg.style.width = ((BLOQUE - s)/BLOQUE*100)+'%';
+
+  // registrar minutos trabajados hoy, separados por tipo de trabajo
+  const d = hoy();
+  contador = (contador || 0) + 1;
+  if(contador % 60 === 0){
+    if(typeof E.horasDia[d] === 'number') E.horasDia[d] = {edicion: E.horasDia[d]};
+    E.horasDia[d] = E.horasDia[d] || {};
+    const cola = pendientes();
+    const tp = cola[0] ? tipoDe(cola[0]) : 'edicion';
+    E.horasDia[d][tp] = (E.horasDia[d][tp] || 0) + 1;
+    guardar();
+  }
+
   if(s <= 0){
     pararReloj(); guardar(); pintar(); avisar();
   }
 }
+let contador = 0;
 
 function arrancarReloj(){
   clearInterval(reloj);
@@ -710,6 +970,8 @@ async function alternar(){
     const s = (E.pausado != null) ? E.pausado : BLOQUE;
     E.finBloque = Date.now() + s*1000;
     E.pausado = null;
+    const cola = pendientes();
+    if(cola[0] && !cola[0].inicio) cola[0].inicio = Date.now();
     try{ if(Notification.permission === 'default') Notification.requestPermission(); }catch(e){}
     arrancarReloj();
   }
@@ -717,8 +979,17 @@ async function alternar(){
 }
 
 async function completar(id){
-  pararReloj();
   const t = E.tareas.find(x=>x.id===id);
+
+  // Aprender: cuánto tardó de verdad vs. lo estimado
+  if(t.inicio){
+    const realMin = Math.round((Date.now() - t.inicio)/60000);
+    if(realMin >= 5 && realMin < 60*14){
+      E.reales[t.fase] = (E.reales[t.fase] || []).concat(realMin / t.min).slice(-8);
+    }
+  }
+
+  pararReloj();
   t.hecho = true;
   const h = new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
   E.log.unshift({txt:`${proy(t.p).nombre} — ${t.nom}`, hora:h});
@@ -823,6 +1094,43 @@ async function crearProyecto(){
 document.getElementById('btn-normal').onclick = async()=>{ E.modo='normal'; pararReloj(); await guardar(); pintar(); };
 document.getElementById('btn-flojo').onclick  = async()=>{ E.modo='flojo';  pararReloj(); await guardar(); pintar(); };
 
+document.getElementById('btn-libre').onclick = async()=>{
+  const d = hoy();
+  const i = E.libres.indexOf(d);
+  if(i >= 0) E.libres.splice(i,1);
+  else { E.libres.push(d); pararReloj(); }
+  await guardar(); pintar();
+};
+
+// Solo las entregas van al calendario, como evento de día completo.
+function bajarICS(k){
+  const f = E.entregas[k];
+  if(!f) return;
+  const nom = proy(k).nombre;
+  const ymd = f.replace(/-/g,'');
+  const sig = new Date(new Date(f+'T12:00:00').getTime() + DIA);
+  const ymd2 = fechaTxt(sig).replace(/-/g,'');
+  const falta = faltaProyecto(k);
+  const ics = [
+    'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//La Bombilla//Sala de edicion//ES',
+    'BEGIN:VEVENT',
+    'UID:' + k + '-' + ymd + '@labombilla',
+    'DTSTAMP:' + new Date().toISOString().replace(/[-:]/g,'').split('.')[0] + 'Z',
+    'DTSTART;VALUE=DATE:' + ymd,
+    'DTEND;VALUE=DATE:' + ymd2,
+    'SUMMARY:Entrega — ' + nom,
+    'DESCRIPTION:' + (falta ? 'Faltan ' + hm(falta) + ' de trabajo.' : 'Todo listo.'),
+    'TRANSP:TRANSPARENT',
+    'END:VEVENT','END:VCALENDAR'
+  ].join('\r\n');
+
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([ics], {type:'text/calendar'}));
+  a.download = 'entrega-' + nom.toLowerCase().replace(/[^a-z0-9]+/g,'-') + '.ics';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // ---- agregar ----
 const form = document.getElementById('form');
 const tabP = document.getElementById('tab-proy'), tabS = document.getElementById('tab-suelta');
@@ -862,6 +1170,7 @@ document.getElementById('crear').onclick = async()=>{
     nom,
     min: Math.max(15, parseInt(document.getElementById('f-min').value)||60),
     energia: document.getElementById('f-energia').value,
+    tipo: document.getElementById('f-tipo').value,
     hecho: false
   });
   document.getElementById('f-nom').value = '';
@@ -870,47 +1179,188 @@ document.getElementById('crear').onclick = async()=>{
   await guardar(); pintar();
 };
 
-// ---- exportar / importar ----
+// ---------- Tipos de trabajo ----------
+// La app mide todo lo que pasa por el temporizador, no solo edición.
+const TIPOS = {
+  edicion:    'Edición',
+  rodaje:     'Rodaje',
+  estrategia: 'Estrategia',
+  montaje:    'Montaje'
+};
+
+const FASE_TIPO = {
+  'Guion':'estrategia', 'Analizar':'estrategia', 'Estrategia':'estrategia',
+  'Rodaje':'rodaje',
+  'Montaje':'montaje',
+  'Material':'edicion', 'Silencios':'edicion', 'Corte bruto':'edicion',
+  'Acabado':'edicion', 'Animación':'edicion', 'Subtítulos':'edicion',
+  'Música':'edicion', 'Entrega':'edicion', 'Selección':'edicion'
+};
+
+const tipoDe = t => t.tipo || FASE_TIPO[t.fase] || 'edicion';
+
+// ---------- Capacidad: ¿puedo recibir otro cliente? ----------
+function sumaEntre(desde, hasta){
+  return Object.entries(E.horasDia)
+    .filter(([d]) => d >= desde && d <= hasta)
+    .reduce((s,[,m]) => s + (typeof m === 'number' ? m : Object.values(m).reduce((a,b)=>a+b,0)), 0);
+}
+
+// minutos por tipo en un rango
+function porTipoEntre(desde, hasta){
+  const r = {};
+  Object.entries(E.horasDia)
+    .filter(([d]) => d >= desde && d <= hasta)
+    .forEach(([,m]) => {
+      if(typeof m === 'number') r.edicion = (r.edicion||0) + m;
+      else Object.entries(m).forEach(([k,v]) => r[k] = (r[k]||0) + v);
+    });
+  return r;
+}
+
+function resumenCapacidad(){
+  const hoyD = new Date();
+  const hoyS = fechaTxt(hoyD);
+
+  const dow = (hoyD.getDay() + 6) % 7;
+  const lunes = fechaTxt(new Date(hoyD.getTime() - dow*DIA));
+  const domingo = fechaTxt(new Date(hoyD.getTime() + (6-dow)*DIA));
+  const mes1 = hoyS.slice(0,8) + '01';
+  const mesFin = fechaTxt(new Date(hoyD.getFullYear(), hoyD.getMonth()+1, 0));
+  const en30 = fechaTxt(new Date(hoyD.getTime() + 30*DIA));
+
+  // comprometido, separado por tipo de trabajo
+  const comp = {};
+  E.tareas.filter(t=>!t.hecho).forEach(t=>{
+    const k = tipoDe(t);
+    comp[k] = (comp[k]||0) + estimado(t);
+  });
+  const comprometido = Object.values(comp).reduce((a,b)=>a+b,0);
+  const disp30 = minutosHasta(en30);
+
+  return {
+    hoy: sumaEntre(hoyS, hoyS),
+    semana: sumaEntre(lunes, domingo),
+    mes: sumaEntre(mes1, mesFin),
+    semanaTipo: porTipoEntre(lunes, domingo),
+    mesTipo: porTipoEntre(mes1, mesFin),
+    dispSemana: minutosHasta(domingo),
+    dispMes: minutosHasta(mesFin),
+    disp30,
+    comp, comprometido,
+    libre30: disp30 - comprometido
+  };
+}
+
+function pintarCapacidad(){
+  const el = document.getElementById('capacidad');
+  if(!el) return;
+  const c = resumenCapacidad();
+  const cap = capacidadMin();
+
+  // Cuánto pide cada tipo de proyecto (con 30% por reuniones y correcciones)
+  const unVideo = FASES.comun.reduce((s,f)=>s+f.min,0);          // 1 video editado
+  const tipicos = {
+    'Proyecto de 4 videos': Math.round(unVideo * 4 * 1.3),
+    'Campaña de pauta':     Math.round((120 + 90) * 1.3),
+    'CRM completo':         Math.round((120 + 150 + 120) * 1.3)
+  };
+
+  const fila = (n, v, alt) =>
+    `<div class="cap-fila"><span>${n}</span><b${alt?` style="color:${alt}"`:''}>${hm(v)}</b></div>`;
+
+  const desglose = obj => Object.entries(TIPOS)
+    .filter(([k]) => obj[k])
+    .map(([k,n]) => `<div class="cap-fila sub2"><span>${n}</span><b>${hm(obj[k])}</b></div>`)
+    .join('');
+
+  const puede = Object.entries(tipicos)
+    .map(([n,m]) => `${n}: <b>${c.libre30 >= m ? Math.floor(c.libre30/m) : 0}</b>`)
+    .join(' · ');
+
+  el.innerHTML = `
+    <div class="cap-tit">Trabajado</div>
+    ${fila('Hoy', c.hoy)}
+    ${fila('Esta semana', c.semana)}
+    ${desglose(c.semanaTipo)}
+    ${fila('Este mes', c.mes)}
+
+    <div class="cap-tit">Disponible</div>
+    ${fila('Resto de la semana', c.dispSemana)}
+    ${fila('Resto del mes', c.dispMes)}
+    ${fila('Próximos 30 días', c.disp30)}
+
+    <div class="cap-tit">Comprometido</div>
+    ${desglose(c.comp)}
+    ${fila('Total pendiente', c.comprometido)}
+    ${fila('Libre en 30 días', c.libre30, c.libre30 < 0 ? 'var(--orange)' : 'var(--moss)')}
+
+    <div class="veredicto ${c.libre30 >= tipicos['Proyecto de 4 videos'] ? '' : 'no'}">
+      ${c.libre30 < 0
+        ? `<b>Ya estás sobrevendido.</b> Lo comprometido no cabe en 30 días. No recibas nada nuevo sin mover una fecha.`
+        : `Con <b>${hm(c.libre30)}</b> libres te caben — ${puede}`}
+      <span class="sub">Incluye 30% por reuniones y correcciones. ${cap.aprendida
+        ? `Basado en tu ritmo real de ${hm(cap.min)}/día.`
+        : `Asume 3h/día hasta medir tu ritmo real.`}</span>
+    </div>`;
+}
 // Formato de texto plano, una tarea por línea:
 //   PROYECTO | FASE | tarea | minutos | energia | estado
 function exportarTexto(){
   const nombreP = k => proy(k).nombre;
+
+  // fechas de entrega, arriba, una por proyecto
+  const ent = Object.entries(E.entregas)
+    .filter(([k]) => E.tareas.some(t => t.p === k))
+    .map(([k,f]) => `@ ${nombreP(k)} | ${f}`);
+
   const lineas = E.tareas.map(t =>
     [nombreP(t.p), t.fase, t.nom, t.min, t.energia, t.hecho ? 'hecho' : 'pendiente'].join(' | ')
   );
-  const cab = '# Sala de edición — cola exportada ' + new Date().toLocaleDateString('es-CO') +
-    '\n# formato: PROYECTO | FASE | tarea | minutos | energia(alta/baja) | estado(hecho/pendiente)\n';
-  return cab + lineas.join('\n');
+
+  return '# Sala de edición — cola exportada ' + new Date().toLocaleDateString('es-CO') +
+    '\n# entregas: @ PROYECTO | AAAA-MM-DD' +
+    '\n# tareas:   PROYECTO | FASE | tarea | minutos | energia(alta/baja) | estado(hecho/pendiente)\n' +
+    (ent.length ? ent.join('\n') + '\n' : '') +
+    lineas.join('\n');
 }
 
-async function importarTexto(txt){
+async function importarTexto(txt, agregar){
   const filas = txt.split('\n')
     .map(l => l.trim())
     .filter(l => l && !l.startsWith('#'));
   if(!filas.length) return {ok:false, msg:'No encontré tareas en el texto.'};
+
+  // separar líneas de entrega (@) de las tareas
+  const lineasEnt = filas.filter(l => l.startsWith('@'));
+  const lineasTar = filas.filter(l => !l.startsWith('@'));
 
   // reconstruir proyectos por nombre
   const porNombre = {};
   Object.entries(todosProyectos()).forEach(([k,v]) => porNombre[v.nombre.toLowerCase()] = k);
   E.propios = E.propios || {};
 
+  let n = 0;
+  function claveDe(nomProy){
+    let k = porNombre[nomProy.toLowerCase()];
+    if(!k){
+      k = 'x' + Date.now() + (n++);
+      const usados = Object.keys(E.propios).length + Object.keys(PROYECTOS).length;
+      E.propios[k] = {nombre: nomProy, color: COLORES[usados % COLORES.length]};
+      porNombre[nomProy.toLowerCase()] = k;
+    }
+    return k;
+  }
+
   const nuevas = [];
   let i = 0;
-  for(const fila of filas){
+  for(const fila of lineasTar){
     const p = fila.split('|').map(s => s.trim());
     if(p.length < 3) continue;
     const [nomProy, fase, nom, min, energia, estado] = p;
-
-    let clave = porNombre[nomProy.toLowerCase()];
-    if(!clave){
-      clave = 'x' + Date.now() + i;
-      const usados = Object.keys(E.propios).length + Object.keys(PROYECTOS).length;
-      E.propios[clave] = {nombre: nomProy, color: COLORES[usados % COLORES.length]};
-      porNombre[nomProy.toLowerCase()] = clave;
-    }
     nuevas.push({
       id: 'c' + Date.now() + '-' + (i++),
-      p: clave,
+      p: claveDe(nomProy),
       fase: fase || 'Suelta',
       nom: nom || 'Sin nombre',
       min: Math.max(5, parseInt(min) || 45),
@@ -920,9 +1370,34 @@ async function importarTexto(txt){
   }
   if(!nuevas.length) return {ok:false, msg:'No pude leer ninguna línea. Revisá el formato.'};
 
+  // fechas de entrega
+  let fechas = 0;
+  for(const l of lineasEnt){
+    const p = l.replace(/^@\s*/,'').split('|').map(s => s.trim());
+    if(p.length < 2) continue;
+    const [nomProy, f] = p;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(f)) continue;
+    E.entregas[claveDe(nomProy)] = f;
+    fechas++;
+  }
+  const conFecha = fechas ? ` y ${fechas} fecha${fechas>1?'s':''} de entrega` : '';
+
+  if(agregar){
+    // Solo salta si ya existe una IDÉNTICA y PENDIENTE (eso sí sería un error).
+    // Si la anterior ya está hecha, es una tanda nueva y entra sin problema.
+    const pend = new Set(
+      E.tareas.filter(t => !t.hecho).map(t => t.p + '|' + t.fase + '|' + t.nom)
+    );
+    const limpias = nuevas.filter(t => !pend.has(t.p + '|' + t.fase + '|' + t.nom));
+    E.tareas = E.tareas.concat(limpias);
+    await guardar(); pintar();
+    const rep = nuevas.length - limpias.length;
+    return {ok:true, msg:`Agregué ${limpias.length} tareas${conFecha}${rep ? ` · ${rep} ya estaban pendientes` : ''}.`};
+  }
+
   E.tareas = nuevas;
   await guardar(); pintar();
-  return {ok:true, msg:`Listo. Cargué ${nuevas.length} tareas.`};
+  return {ok:true, msg:`Reemplacé la cola con ${nuevas.length} tareas${conFecha}.`};
 }
 
 document.getElementById('exportar').onclick = async()=>{
@@ -939,8 +1414,12 @@ document.getElementById('exportar').onclick = async()=>{
 
 document.getElementById('importar').onclick = async()=>{
   const txt = prompt('Pegá acá la cola que te di en el chat:');
-  if(txt == null) return;
-  const r = await importarTexto(txt);
+  if(txt == null || !txt.trim()) return;
+  const agregar = confirm(
+    'Aceptar = AGREGAR a lo que ya tenés (no borra nada)\n\n' +
+    'Cancelar = REEMPLAZAR toda la cola'
+  );
+  const r = await importarTexto(txt, agregar);
   document.getElementById('estado').textContent = r.msg;
   document.getElementById('estado').style.color = r.ok ? 'var(--moss)' : 'var(--orange)';
 };
