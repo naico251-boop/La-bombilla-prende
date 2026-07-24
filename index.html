@@ -209,6 +209,7 @@
   }
   .tab[aria-pressed="true"]{background:var(--alabaster);color:var(--teal);border-color:var(--alabaster)}
   #modo-proy,#modo-suelta{display:flex;flex-direction:column;gap:8px}
+  #modo-proy[hidden],#modo-suelta[hidden]{display:none}
   .fases{display:flex;flex-direction:column;gap:2px;margin:2px 0}
   .fases label{
     display:flex;align-items:center;gap:9px;padding:7px 9px;cursor:pointer;
@@ -379,12 +380,11 @@
 
     <!-- tarea suelta -->
     <div id="modo-suelta" hidden>
-      <div class="fila">
-        <select id="f-proy"></select>
-        <input id="f-fase" placeholder="Fase (ej. Corte bruto)">
-      </div>
       <input id="f-nom" placeholder="¿Qué hay que hacer?">
       <div class="fila">
+        <select id="f-proy"></select>
+        <input id="f-fase" placeholder="Fase (opcional)">
+      </div>      <div class="fila">
         <input id="f-min" type="number" inputmode="numeric" placeholder="Minutos" value="60">
         <select id="f-energia">
           <option value="alta">Energía alta</option>
@@ -1183,14 +1183,15 @@ document.getElementById('cancelar2').onclick = ()=>{ form.hidden = true; };
 document.getElementById('crear').onclick = async()=>{
   const nom = document.getElementById('f-nom').value.trim();
   if(!nom){ document.getElementById('f-nom').focus(); return; }
+  const tipoSel = document.getElementById('f-tipo').value;
   E.tareas.push({
     id: 'c'+Date.now(),
     p: document.getElementById('f-proy').value,
-    fase: document.getElementById('f-fase').value.trim() || 'Suelta',
+    fase: document.getElementById('f-fase').value.trim() || TIPOS[tipoSel],
     nom,
     min: Math.max(15, parseInt(document.getElementById('f-min').value)||60),
     energia: document.getElementById('f-energia').value,
-    tipo: document.getElementById('f-tipo').value,
+    tipo: tipoSel,
     hecho: false
   });
   document.getElementById('f-nom').value = '';
