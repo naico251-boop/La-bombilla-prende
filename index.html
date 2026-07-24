@@ -235,6 +235,43 @@
   .nota{font-size:12px;line-height:1.5;color:var(--muted)}
   .nota em{color:var(--alabaster);font-style:normal}
 
+  /* ---- rutina diaria ---- */
+  .rutina{border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px}
+  .rutina-top{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+  .rutina-top .cuenta{
+    margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)
+  }
+  .rutina-top .flecha{color:var(--muted);font-size:11px;transition:transform .2s}
+  .rutina.abierta .flecha{transform:rotate(90deg)}
+  .rutina-cuerpo{display:none;margin-top:10px}
+  .rutina.abierta .rutina-cuerpo{display:block}
+
+  .chk{
+    display:flex;align-items:flex-start;gap:10px;padding:9px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .chk input{accent-color:var(--moss);width:16px;height:16px;flex:none;margin-top:2px;cursor:pointer}
+  .chk .txt{flex:1;min-width:0;font-size:14px;line-height:1.35}
+  .chk .nota{
+    display:block;font-size:12px;color:var(--muted);margin-top:2px;
+    background:none;border:0;padding:0;width:100%;font-family:'Archivo',sans-serif;
+  }
+  .chk .nota:focus{outline:none;color:var(--alabaster)}
+  .chk .nota::placeholder{color:rgba(94,115,120,.6)}
+  .chk.lista .txt{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}
+  .chk .quitar{
+    background:none;border:0;color:var(--muted);cursor:pointer;font-size:15px;
+    padding:0 2px;line-height:1;flex:none;opacity:.5
+  }
+  .chk .quitar:hover{opacity:1;color:var(--orange)}
+  .rutina .add{
+    width:100%;margin-top:10px;padding:9px;background:transparent;
+    border:1px dashed var(--line);border-radius:var(--radius);color:var(--muted);
+    font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;
+    text-transform:uppercase;cursor:pointer;
+  }
+  .rutina .add:active{color:var(--alabaster)}
+
   /* ---- panorama ---- */
   .pano{
     border:1px solid var(--line);border-left:3px solid var(--moss);
@@ -331,6 +368,8 @@
   <button id="btn-flojo" aria-pressed="false">Día flojo</button>
   <button id="btn-libre" aria-pressed="false">Hoy no edito</button>
 </div>
+
+<div id="rutina"></div>
 
 <div id="panorama"></div>
 
@@ -513,7 +552,14 @@ let E = {
   reales: {},       // {fase: [min reales por video]} — para aprender
   sabados: false,   // ¿cuenta el sábado como día hábil?
   pospuestas: [],   // ids que saltaste hoy
-  fijada: null      // id que elegiste a mano
+  fijada: null,     // id que elegiste a mano
+  rutina: [         // chequeo rápido de cada mañana
+    {id:'r1', txt:'Revisar campañas activas en Meta', nota:'', hecho:false},
+    {id:'r2', txt:'Visualizaciones del contenido publicado', nota:'', hecho:false},
+    {id:'r3', txt:'Mensajes y leads sin responder', nota:'', hecho:false}
+  ],
+  rutinaDia: null,  // día en que se marcó por última vez
+  rutinaAbierta: true
 };
 
 let reloj = null;
@@ -723,6 +769,12 @@ function marcarGuardado(r){
 
 function chequearDia(){
   const d = hoy();
+  // la rutina se desmarca sola cada día, pero los textos y notas quedan
+  if(E.rutinaDia !== d){
+    (E.rutina || []).forEach(r => r.hecho = false);
+    E.rutinaDia = d;
+    E.rutinaAbierta = true;
+  }
   if(E.ultimoDia && E.ultimoDia !== d){
     const ayer = new Date(Date.now()-86400000).toISOString().slice(0,10);
     if(E.ultimoDia !== ayer) E.racha = 0;   // se rompió la racha
@@ -770,6 +822,67 @@ function pendientes(){
 function fmt(s){
   const m = Math.floor(s/60), r = s%60;
   return String(m).padStart(2,'0')+':'+String(r).padStart(2,'0');
+}
+
+function pintarRutina(){
+  const el = document.getElementById('rutina');
+  if(!el) return;
+  const R = E.rutina || [];
+  const hechas = R.filter(r=>r.hecho).length;
+  const todo = R.length && hechas === R.length;
+
+  el.innerHTML = `
+    <div class="rutina ${E.rutinaAbierta ? 'abierta' : ''}">
+      <div class="rutina-top" id="rutina-top">
+        <span class="flecha">▸</span>
+        <span class="eyebrow">Chequeo de la mañana</span>
+        <span class="cuenta" style="${todo ? 'color:var(--moss)' : ''}">${hechas}/${R.length}${todo ? ' ✓' : ''}</span>
+      </div>
+      <div class="rutina-cuerpo">
+        ${R.map(r => `
+          <div class="chk ${r.hecho ? 'lista' : ''}">
+            <input type="checkbox" ${r.hecho ? 'checked' : ''} data-chk="${r.id}">
+            <span class="txt">${r.txt}
+              <input class="nota" data-nota="${r.id}" value="${(r.nota||'').replace(/"/g,'&quot;')}"
+                     placeholder="qué mirar…">
+            </span>
+            <button class="quitar" data-quitar="${r.id}" title="Quitar">×</button>
+          </div>`).join('') || '<div class="nota">Sin nada por chequear.</div>'}
+        <button class="add" id="rutina-add">+ Agregar al chequeo</button>
+      </div>
+    </div>`;
+
+  document.getElementById('rutina-top').onclick = async()=>{
+    E.rutinaAbierta = !E.rutinaAbierta;
+    await guardar(); pintarRutina();
+  };
+  el.querySelectorAll('[data-chk]').forEach(i=>{
+    i.onchange = async()=>{
+      const r = E.rutina.find(x=>x.id === i.dataset.chk);
+      if(r) r.hecho = i.checked;
+      await guardar(); pintarRutina();
+    };
+  });
+  el.querySelectorAll('[data-nota]').forEach(i=>{
+    i.onchange = async()=>{
+      const r = E.rutina.find(x=>x.id === i.dataset.nota);
+      if(r) r.nota = i.value.trim();
+      await guardar();
+    };
+    i.onclick = e => e.stopPropagation();
+  });
+  el.querySelectorAll('[data-quitar]').forEach(b=>{
+    b.onclick = async()=>{
+      E.rutina = E.rutina.filter(x=>x.id !== b.dataset.quitar);
+      await guardar(); pintarRutina();
+    };
+  });
+  document.getElementById('rutina-add').onclick = async()=>{
+    const t = prompt('¿Qué querés chequear cada mañana?');
+    if(!t || !t.trim()) return;
+    E.rutina = (E.rutina||[]).concat({id:'r'+Date.now(), txt:t.trim(), nota:'', hecho:false});
+    await guardar(); pintarRutina();
+  };
 }
 
 function pintar(){
@@ -917,6 +1030,7 @@ function pintar(){
   });
 
   pintarCapacidad();
+  pintarRutina();
 
   // log
   document.getElementById('log').innerHTML = E.log.length
