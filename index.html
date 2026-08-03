@@ -407,6 +407,8 @@
       </div>
       <p class="nota">Se van a crear las fases una por una, para los <em id="p-eco">4</em> videos juntos. Nunca un video a la vez.</p>
       <div id="p-fases" class="fases"></div>
+      <label class="nota" for="p-fecha">Fecha de entrega (opcional)</label>
+      <input id="p-fecha" type="date">
       <div class="fila">
         <button class="crear" id="p-crear">Crear las fases</button>
         <button class="cancelar" id="cancelar">Cancelar</button>
@@ -434,6 +436,8 @@
         <option value="estrategia">Estrategia</option>
         <option value="montaje">Montaje</option>
       </select>
+      <label class="nota" for="f-fecha">Fecha de entrega (opcional)</label>
+      <input id="f-fecha" type="date">
       <div class="fila">
         <button class="crear" id="crear">Agregar a la cola</button>
         <button class="cancelar" id="cancelar2">Cancelar</button>
@@ -1025,7 +1029,12 @@ function pintar(){
   }
 
   // proyectos
-  document.getElementById('proyectos').innerHTML = Object.keys(todosProyectos()).map(k=>{
+  // Unión de las claves registradas (fábrica + E.propios) con las que de verdad
+  // aparecen en E.tareas: así ninguna tarea queda huérfana fuera de la lista,
+  // aunque su proyecto no haya quedado registrado por algún motivo.
+  const clavesProyectos = new Set(Object.keys(todosProyectos()));
+  E.tareas.forEach(t => clavesProyectos.add(t.p));
+  document.getElementById('proyectos').innerHTML = [...clavesProyectos].map(k=>{
     const ts = E.tareas.filter(t=>t.p===k);
     if(!ts.length) return '';
     const d = ts.filter(t=>t.hecho).length;
@@ -1254,7 +1263,11 @@ async function crearProyecto(){
     });
   });
 
+  const fecha = document.getElementById('p-fecha').value;
+  if(fecha) E.entregas[k] = fecha;
+
   document.getElementById('p-nom').value = '';
+  document.getElementById('p-fecha').value = '';
   document.getElementById('form').hidden = true;
   await guardar(); pintar();
   avisoBreve('Proyecto agregado');
@@ -1343,9 +1356,10 @@ document.getElementById('crear').onclick = async()=>{
   const nom = document.getElementById('f-nom').value.trim();
   if(!nom){ document.getElementById('f-nom').focus(); return; }
   const tipoSel = document.getElementById('f-tipo').value;
+  const pk = resolverProyecto(document.getElementById('f-proy').value);
   E.tareas.push({
     id: 'c'+Date.now(),
-    p: resolverProyecto(document.getElementById('f-proy').value),
+    p: pk,
     fase: document.getElementById('f-fase').value.trim() || TIPOS[tipoSel],
     nom,
     min: Math.max(15, parseInt(document.getElementById('f-min').value)||60),
@@ -1353,8 +1367,13 @@ document.getElementById('crear').onclick = async()=>{
     tipo: tipoSel,
     hecho: false
   });
+
+  const fecha = document.getElementById('f-fecha').value;
+  if(fecha && pk) E.entregas[pk] = fecha;
+
   document.getElementById('f-nom').value = '';
   document.getElementById('f-fase').value = '';
+  document.getElementById('f-fecha').value = '';
   form.hidden = true;
   await guardar(); pintar();
   avisoBreve('Tarea agregada');
