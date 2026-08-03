@@ -571,6 +571,7 @@ let E = {
   sabados: false,   // ¿cuenta el sábado como día hábil?
   pospuestas: [],   // ids que saltaste hoy
   fijada: null,     // id que elegiste a mano
+  completados: {},  // {claveProyecto: timestamp(ms) de cuando quedó 100% hecho} — para ocultarlo 1 día después
   rutina: [         // chequeo rápido de cada mañana
     {id:'r1', txt:'Revisar campañas activas en Meta', nota:'', hecho:false},
     {id:'r2', txt:'Visualizaciones del contenido publicado', nota:'', hecho:false},
@@ -771,6 +772,7 @@ async function cargar(){
 }
 
 async function guardar(){
+  revisarCompletados();
   const r = await almacen.escribir(E);
   marcarGuardado(r);
 }
@@ -922,7 +924,31 @@ function pintarRutina(){
   };
 }
 
+// Cuánto tiempo queda visible un proyecto ya terminado antes de desaparecer.
+const MS_OCULTAR = 24*60*60*1000; // un día
+
+// Marca cuándo un proyecto quedó 100% hecho (para ocultarlo un día después) y
+// limpia la marca si el proyecto vuelve a tener trabajo pendiente o se queda sin tareas.
+function revisarCompletados(){
+  E.completados = E.completados || {};
+  const porProy = {};
+  E.tareas.forEach(t => { (porProy[t.p] = porProy[t.p] || []).push(t); });
+  // proyectos que ya no existen: fuera de la marca
+  Object.keys(E.completados).forEach(k => { if(!porProy[k]) delete E.completados[k]; });
+  // revisar cada proyecto vivo
+  Object.keys(porProy).forEach(k => {
+    const ts = porProy[k];
+    const completo = ts.length && ts.every(t => t.hecho);
+    if(completo){
+      if(!E.completados[k]) E.completados[k] = Date.now(); // arranca la cuenta
+    }else{
+      delete E.completados[k]; // volvió a tener pendientes → sigue visible
+    }
+  });
+}
+
 function pintar(){
+  revisarCompletados();
   const f = new Date();
   document.getElementById('fecha').textContent =
     f.toLocaleDateString('es-CO',{weekday:'long', day:'numeric', month:'long'});
@@ -1037,6 +1063,8 @@ function pintar(){
   document.getElementById('proyectos').innerHTML = [...clavesProyectos].map(k=>{
     const ts = E.tareas.filter(t=>t.p===k);
     if(!ts.length) return '';
+    // proyecto terminado hace más de un día: se retira de la lista para no acumular
+    if(E.completados[k] && (Date.now() - E.completados[k]) > MS_OCULTAR) return '';
     const d = ts.filter(t=>t.hecho).length;
     const pct = Math.round(d/ts.length*100);
     const falta = faltaProyecto(k);
