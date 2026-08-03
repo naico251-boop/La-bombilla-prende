@@ -929,6 +929,10 @@ const MS_OCULTAR = 24*60*60*1000; // un día
 
 // Marca cuándo un proyecto quedó 100% hecho (para ocultarlo un día después) y
 // limpia la marca si el proyecto vuelve a tener trabajo pendiente o se queda sin tareas.
+// Un proyecto que ya está completo pero SIN marca es uno que se terminó antes de que
+// existiera esta lógica (o se importó ya hecho): se le pone una marca ya vencida para
+// que se retire de una. Los que terminás de ahora en adelante reciben su marca fresca
+// en completar(), así se quedan visibles el día que los cerrás.
 function revisarCompletados(){
   E.completados = E.completados || {};
   const porProy = {};
@@ -940,7 +944,7 @@ function revisarCompletados(){
     const ts = porProy[k];
     const completo = ts.length && ts.every(t => t.hecho);
     if(completo){
-      if(!E.completados[k]) E.completados[k] = Date.now(); // arranca la cuenta
+      if(!E.completados[k]) E.completados[k] = Date.now() - MS_OCULTAR - 1000; // ya terminado de antes → se oculta ya
     }else{
       delete E.completados[k]; // volvió a tener pendientes → sigue visible
     }
@@ -1200,6 +1204,10 @@ async function completar(id){
   t.hecho = true;
   if(E.fijada === id) E.fijada = null;
   E.pospuestas = (E.pospuestas || []).filter(x => x !== id);
+  // si con esta tarea el proyecto quedó 100%, dale su día de gracia (marca fresca):
+  // así se queda visible hoy y se retira solo mañana.
+  E.completados = E.completados || {};
+  if(E.tareas.filter(x=>x.p===t.p).every(x=>x.hecho)) E.completados[t.p] = Date.now();
   const h = new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
   E.log.unshift({txt:`${proy(t.p).nombre} — ${t.nom}`, hora:h});
   if(E.ultimoDia !== hoy()){ E.racha++; E.ultimoDia = hoy(); }
