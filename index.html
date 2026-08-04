@@ -859,9 +859,12 @@ function pendientes(){
 }
 
 function fmt(s){
-  const m = Math.floor(s/60), r = s%60;
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), r = s%60;
+  if(h > 0) return h+':'+String(m).padStart(2,'0')+':'+String(r).padStart(2,'0');
   return String(m).padStart(2,'0')+':'+String(r).padStart(2,'0');
 }
+// Horas en decimal, para leerlo como se piensa el tiempo (ej. 5.83 h)
+function fmtH(s){ return (s/3600).toFixed(2)+' h'; }
 
 function pintarRutina(){
   const el = document.getElementById('rutina');
@@ -989,7 +992,7 @@ function pintar(){
         <div class="render">
           <div class="render-top">
             <span class="tc" id="tc">${fmt(s)}</span>
-            <span class="eyebrow">${va ? 'Corriendo — podés minimizar' : 'Cronómetro en pausa'}</span>
+            <span class="eyebrow" id="tc-h">${fmtH(s)} · ${va ? 'corriendo, podés minimizar' : 'en pausa'}</span>
           </div>
           <div class="barra"><i id="prog" style="width:${pct}%;background:${pr.color}"></i></div>
         </div>
@@ -1074,6 +1077,9 @@ function pintar(){
     const falta = faltaProyecto(k);
     const f = E.entregas[k] || '';
     const h = holgura(k);
+    // ¿se puede dividir? solo proyectos de varios videos, con nombre "... (N)" y fases pendientes
+    const mDiv = (proy(k).nombre || '').match(/\((\d+)\)\s*$/);
+    const puedeDiv = mDiv && parseInt(mDiv[1]) >= 2 && ts.some(t=>!t.hecho);
     let est = '';
     if(f && falta > 0){
       const dd = diasHasta(f);
@@ -1091,6 +1097,8 @@ function pintar(){
       <div class="ent">
         <input type="date" value="${f}" data-k="${k}" class="fecha-ent">
         ${est}
+        ${puedeDiv ? `<button class="ics" data-div="${k}">dividir</button>` : ''}
+        ${puedeDiv ? `<button class="ics" data-sug="${k}">sugerir tandas</button>` : ''}
         ${f ? `<button class="ics" data-ics="${k}">calendario</button>` : ''}
       </div>
     </div>`;
@@ -1105,6 +1113,12 @@ function pintar(){
   });
   document.querySelectorAll('[data-ics]').forEach(el=>{
     el.onclick = ()=>bajarICS(el.dataset.ics);
+  });
+  document.querySelectorAll('[data-div]').forEach(el=>{
+    el.onclick = ()=>dividirProyecto(el.dataset.div);
+  });
+  document.querySelectorAll('[data-sug]').forEach(el=>{
+    el.onclick = ()=>sugerirTandas(el.dataset.sug);
   });
 
   pintarCapacidad();
@@ -1139,6 +1153,8 @@ function tic(){
   const actual = cola[0];
   const tc = document.getElementById('tc'), pg = document.getElementById('prog');
   if(tc) tc.textContent = fmt(s);
+  const th = document.getElementById('tc-h');
+  if(th) th.textContent = fmtH(s) + ' · corriendo, podés minimizar';
   if(pg && actual) pg.style.width = Math.min(100, Math.round(s/(actual.min*60)*100))+'%';
 
   // registrar minutos trabajados hoy, separados por tipo de trabajo
@@ -1307,6 +1323,93 @@ async function crearProyecto(){
   document.getElementById('form').hidden = true;
   await guardar(); pintar();
   avisoBreve('Proyecto agregado');
+}
+
+// Dividir un proyecto de varios videos: saca M videos a un grupo aparte.
+// Se puede hacer en CUALQUIER momento. Solo se llevan las fases PENDIENTES
+// (las ya hechas se quedan en el original), repartidas por proporción M/N.
+// El grupo nuevo tiene su propia barra y su propia fecha de entrega, editable.
+async function dividirProyecto(k){
+  const pr = proy(k);
+  const m = (pr.nombre || '').match(/\((\d+)\)\s*$/);
+  if(!m){ avisoBreve('Solo se dividen proyectos de varios videos'); return; }
+  const N = parseInt(m[1]);
+  if(N < 2){ avisoBreve('Necesita al menos 2 videos para dividir'); return; }
+
+  const pend = E.tareas.filter(t => t.p === k && !t.hecho);
+  if(!pend.length){ avisoBreve('Este proyecto ya no tiene fases pendientes'); return; }
+
+  const base = pr.nombre.replace(/\s*\(\d+\)\s*$/, '');
+  const resp = prompt('¿Cuántos videos sacar a un grupo aparte? (de ' + N + ')');
+  if(resp === null) return;
+  const M = parseInt(resp);
+  if(!(M >= 1 && M < N)){ avisoBreve('Poné un número entre 1 y ' + (N-1)); return; }
+  const rest = N - M;
+
+  // proyecto nuevo (grupo aparte)
+  const k2 = 'x' + Date.now();
+  E.propios = E.propios || {};
+  const usados = Object.keys(E.propios).length + Object.keys(PROYECTOS).length;
+  E.propios[k2] = { nombre: `${base} — aparte (${M})`, color: COLORES[usados % COLORES.length] };
+
+  // mover solo las fases pendientes, por proporción; el original conserva el resto
+  pend.forEach((t,i)=>{
+    const nuevoMin = Math.max(1, Math.round(t.min * M / N));
+    const restoMin = Math.max(1, t.min - nuevoMin);
+    E.tareas.push({
+      id: 'd' + Date.now() + '-' + i,
+      p: k2,
+      fase: t.fase,
+      nom: t.nom.replace(/los \d+/, 'los ' + M),
+      min: nuevoMin,
+      energia: t.energia,
+      hecho: false
+    });
+    t.min = restoMin;
+    t.nom = t.nom.replace(/los \d+/, 'los ' + rest);
+  });
+
+  // el original baja su cantidad en el nombre (conservando color)
+  E.propios[k] = { ...pr, nombre: `${base} (${rest})` };
+
+  // la fecha del grupo nuevo arranca igual a la del original — cambiala en su barra
+  if(E.entregas[k]) E.entregas[k2] = E.entregas[k];
+
+  await guardar(); pintar();
+  avisoBreve('Saqué ' + M + ' a un grupo aparte');
+}
+
+// Sugerir tandas: solo cuando el usuario toca el botón. Estima cuántos videos
+// alcanza a terminar por semana con su capacidad real (o las 3h base) y el peso
+// de las fases pendientes, y sugiere el tamaño de tanda. NO pone fechas: esas
+// las decide el usuario a mano con "dividir". Es una referencia para planear.
+function sugerirTandas(k){
+  const pr = proy(k);
+  const m = (pr.nombre || '').match(/\((\d+)\)\s*$/);
+  if(!m){ avisoBreve('Solo para proyectos de varios videos'); return; }
+  const N = parseInt(m[1]);
+  if(N < 2){ avisoBreve('Necesita al menos 2 videos'); return; }
+
+  const pendMin = E.tareas.filter(t => t.p === k && !t.hecho).reduce((s,t)=>s+t.min, 0);
+  if(pendMin <= 0){ avisoBreve('Este proyecto ya no tiene fases pendientes'); return; }
+  const porVideo = pendMin / N;
+
+  const capDia = capacidadMin();
+  const diasSemana = E.sabados ? 6 : 5;      // el modelo de capacidad es lun-vie (+sáb opcional)
+  const capSemana = capDia.min * diasSemana;
+  const hSemana = Math.round(capSemana / 60 * 10) / 10;
+  const fuente = capDia.aprendida ? 'tu ritmo real' : 'ritmo base 3h/día';
+
+  let porTanda = Math.floor(capSemana / porVideo);
+  if(porTanda < 1) porTanda = 1;             // nunca menos de 1 por tanda
+
+  if(porTanda >= N){
+    alert(`${N} videos.\nCon ${fuente} (~${hSemana}h/semana) te caben los ${N} juntos en una semana. No hace falta partir.`);
+    return;
+  }
+  const tandas = Math.ceil(N / porTanda);
+  const cola = (N % porTanda) ? ' (la última más chica)' : '';
+  alert(`${N} videos.\nCon ${fuente} (~${hSemana}h/semana) alcanzás ~${porTanda} por semana.\n\nSugerencia: ${tandas} tandas de ${porTanda}${cola}.\n\nUsá "dividir" para sacar la primera tanda y ponele su fecha a mano.`);
 }
 
 document.getElementById('btn-normal').onclick = async()=>{ E.modo='normal'; pararReloj(); await guardar(); pintar(); };
