@@ -162,6 +162,14 @@
 
   /* ---- proyectos ---- */
   .proy{margin-bottom:14px}
+  .cli{margin-bottom:22px}
+  .cli > .proy{margin-left:12px}
+  .cli-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+    margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+  .cli-head span:first-child{font-family:'IBM Plex Mono',monospace;font-size:12px;
+    letter-spacing:.08em;text-transform:uppercase;color:var(--alabaster);min-width:0}
+  .cli-head .cli-sub{font-family:'IBM Plex Mono',monospace;font-size:10px;
+    letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap;flex:none}
   .proy-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:6px}
   .proy-top span:first-child{font-size:13px;font-weight:500;min-width:0}
   .proy-top .cont{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);white-space:nowrap;flex:none}
@@ -397,7 +405,8 @@
 
     <!-- proyecto de video: genera las fases solo -->
     <div id="modo-proy">
-      <input id="p-nom" placeholder="Nombre del cliente o proyecto">
+      <input id="p-cli" list="clientes-list" placeholder="Cliente (elegí uno o creá nuevo)" autocomplete="off">
+      <input id="p-nom" placeholder="Nombre del proyecto (ej. Videos, Reels)">
       <div class="fila">
         <input id="p-cant" type="number" inputmode="numeric" min="1" value="4" placeholder="¿Cuántos videos?">
         <select id="p-estado">
@@ -419,10 +428,10 @@
     <div id="modo-suelta" hidden>
       <input id="f-nom" placeholder="¿Qué hay que hacer?">
       <div class="fila">
-        <input id="f-proy" list="f-proy-list" placeholder="Proyecto o cliente" autocomplete="off">
+        <input id="f-cli" list="clientes-list" placeholder="Cliente (elegí uno o creá nuevo)" autocomplete="off">
         <input id="f-fase" placeholder="Fase (opcional)">
       </div>
-      <datalist id="f-proy-list"></datalist>
+      <datalist id="clientes-list"></datalist>
       <div class="fila">
         <input id="f-min" type="number" inputmode="numeric" placeholder="Minutos" value="60">
         <select id="f-energia">
@@ -1067,7 +1076,9 @@ function pintar(){
   // aunque su proyecto no haya quedado registrado por algún motivo.
   const clavesProyectos = new Set(Object.keys(todosProyectos()));
   E.tareas.forEach(t => clavesProyectos.add(t.p));
-  document.getElementById('proyectos').innerHTML = [...clavesProyectos].map(k=>{
+  // Cada proyecto/tarea es una barra. Se agrupan por cliente, con un encabezado
+  // y un resumen de cuántas cosas quedan pendientes en ese cliente.
+  function barraProyecto(k){
     const ts = E.tareas.filter(t=>t.p===k);
     if(!ts.length) return '';
     // proyecto terminado hace más de un día: se retira de la lista para no acumular
@@ -1102,7 +1113,28 @@ function pintar(){
         ${f ? `<button class="ics" data-ics="${k}">calendario</button>` : ''}
       </div>
     </div>`;
-  }).join('');
+  }
+
+  // agrupar las barras por cliente
+  const grupos = {};   // cliente -> [{html, pend}]
+  [...clavesProyectos].forEach(k=>{
+    const html = barraProyecto(k);
+    if(!html) return;
+    const c = clienteDe(k);
+    (grupos[c] = grupos[c] || []).push({ html, pend: faltaProyecto(k) > 0 });
+  });
+
+  document.getElementById('proyectos').innerHTML = Object.keys(grupos)
+    .sort((a,b)=>a.localeCompare(b))
+    .map(c=>{
+      const items = grupos[c];
+      const pend = items.filter(it=>it.pend).length;
+      const resumen = pend ? `${pend} pendiente${pend>1?'s':''}` : 'al día';
+      return `<div class="cli">
+        <div class="cli-head"><span>${c}</span><span class="cli-sub">${resumen}</span></div>
+        ${items.map(it=>it.html).join('')}
+      </div>`;
+    }).join('');
 
   document.querySelectorAll('.fecha-ent').forEach(el=>{
     el.onchange = async()=>{
@@ -1289,8 +1321,10 @@ function pintarFases(){
 }
 
 async function crearProyecto(){
-  const nombre = document.getElementById('p-nom').value.trim();
-  if(!nombre){ document.getElementById('p-nom').focus(); return; }
+  const cliente = document.getElementById('p-cli').value.trim();
+  let nombre = document.getElementById('p-nom').value.trim();
+  if(!cliente && !nombre){ document.getElementById('p-cli').focus(); return; }
+  if(!nombre) nombre = 'Videos';
   const n = Math.max(1, parseInt(document.getElementById('p-cant').value) || 1);
   const elegidas = new Set([...document.querySelectorAll('#p-fases input:checked')].map(i=>i.value));
   const fases = plantilla().filter(f => elegidas.has(f.fase));
@@ -1300,6 +1334,7 @@ async function crearProyecto(){
   E.propios = E.propios || {};
   E.propios[k] = {
     nombre: `${nombre} (${n})`,
+    cliente: cliente || undefined,
     color: COLORES[Object.keys(E.propios).length % COLORES.length]
   };
 
@@ -1318,6 +1353,7 @@ async function crearProyecto(){
   const fecha = document.getElementById('p-fecha').value;
   if(fecha) E.entregas[k] = fecha;
 
+  document.getElementById('p-cli').value = '';
   document.getElementById('p-nom').value = '';
   document.getElementById('p-fecha').value = '';
   document.getElementById('form').hidden = true;
@@ -1470,22 +1506,39 @@ document.getElementById('p-estado').onchange = pintarFases;
 document.getElementById('p-crear').onclick = crearProyecto;
 pintarFases();
 
+// Cliente de un proyecto: atributo explícito si existe; si no, lo que va antes
+// de " — " en el nombre; si no, el nombre mismo (sin el "(N)"). Así los proyectos
+// viejos se agrupan por su nombre o por la convención "Cliente — algo", y los
+// nuevos por el cliente que elegiste al crearlos.
+function clienteDe(k){
+  const p = (E.propios || {})[k];
+  if(p && p.cliente) return p.cliente;
+  const nom = (proy(k).nombre || '');
+  if(nom.includes(' — ')) return nom.split(' — ')[0].trim();
+  return nom.replace(/\s*\(\d+\)\s*$/, '').trim() || 'Sin cliente';
+}
+
+// Lista de clientes existentes (para los desplegables), sin repetir.
+function clientesActuales(){
+  const set = new Set();
+  const claves = new Set(Object.keys(todosProyectos()));
+  E.tareas.forEach(t => claves.add(t.p));
+  claves.forEach(k => { const c = clienteDe(k); if(c && c !== 'Sin cliente') set.add(c); });
+  return [...set].sort((a,b)=>a.localeCompare(b));
+}
+
 function refrescarListaProyectos(){
-  const proyectosActuales = todosProyectos();
-  document.getElementById('f-proy-list').innerHTML =
-    Object.values(proyectosActuales).map(v=>`<option value="${v.nombre.replace(/"/g,'&quot;')}"></option>`).join('');
-  const fProy = document.getElementById('f-proy');
-  if(!fProy.value.trim()){
-    const primero = Object.values(proyectosActuales)[0];
-    if(primero) fProy.value = primero.nombre;
-  }
+  const opts = clientesActuales()
+    .map(c => `<option value="${c.replace(/"/g,'&quot;')}"></option>`).join('');
+  const dl = document.getElementById('clientes-list');
+  if(dl) dl.innerHTML = opts;
 }
 
 document.getElementById('abrir').onclick = ()=>{
   form.hidden = !form.hidden;
   if(!form.hidden){
     refrescarListaProyectos();
-    document.getElementById('p-nom').focus();
+    document.getElementById('p-cli').focus();
   }
 };
 document.getElementById('cancelar').onclick  = ()=>{ form.hidden = true; };
@@ -1495,7 +1548,18 @@ document.getElementById('crear').onclick = async()=>{
   const nom = document.getElementById('f-nom').value.trim();
   if(!nom){ document.getElementById('f-nom').focus(); return; }
   const tipoSel = document.getElementById('f-tipo').value;
-  const pk = resolverProyecto(document.getElementById('f-proy').value);
+  const cliente = document.getElementById('f-cli').value.trim();
+
+  // cada tarea suelta es su propia barra (su propio proyecto), así nunca se suma
+  // al conteo de fases de un proyecto de video. Se agrupa por el cliente elegido.
+  const pk = 's' + Date.now();
+  E.propios = E.propios || {};
+  E.propios[pk] = {
+    nombre: nom,
+    cliente: cliente || undefined,
+    color: COLORES[Object.keys(E.propios).length % COLORES.length]
+  };
+
   E.tareas.push({
     id: 'c'+Date.now(),
     p: pk,
@@ -1508,9 +1572,10 @@ document.getElementById('crear').onclick = async()=>{
   });
 
   const fecha = document.getElementById('f-fecha').value;
-  if(fecha && pk) E.entregas[pk] = fecha;
+  if(fecha) E.entregas[pk] = fecha;
 
   document.getElementById('f-nom').value = '';
+  document.getElementById('f-cli').value = '';
   document.getElementById('f-fase').value = '';
   document.getElementById('f-fecha').value = '';
   form.hidden = true;
