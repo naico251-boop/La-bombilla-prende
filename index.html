@@ -32,6 +32,13 @@
     --line:rgba(245,245,240,.10);
     --radius:3px;
   }
+  .aviso-permiso{position:fixed;left:16px;right:16px;bottom:16px;z-index:80;max-width:520px;margin:0 auto;
+    background:var(--teal-lift);border:1px solid var(--orange);border-radius:8px;
+    padding:12px 14px;display:flex;gap:12px;align-items:center;justify-content:space-between;
+    font-family:'Archivo',sans-serif;font-size:13px;line-height:1.35;color:var(--alabaster);
+    box-shadow:0 6px 24px rgba(0,0,0,.45)}
+  .aviso-permiso button{flex:none;background:var(--orange);border:0;color:#fff;cursor:pointer;
+    padding:8px 12px;border-radius:6px;font-family:'Archivo',sans-serif;font-size:12px}
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
   html,body{background:var(--teal);color:var(--alabaster);overflow-x:hidden}
   section{max-width:100%}
@@ -1216,10 +1223,37 @@ function arrancarReloj(){
   tic();
 }
 
+// --- Sonido: dos o tres bips en el aviso de 30 min. Los genera la propia app
+// (Web Audio), sin archivos externos, para no romper el modo offline. ---
+let audioCtx = null;
+function desbloquearAudio(){
+  try{
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if(audioCtx.state === 'suspended') audioCtx.resume();
+  }catch(e){}
+}
+function bip(veces){
+  if(!audioCtx) return;
+  try{
+    const base = audioCtx.currentTime;
+    for(let i=0;i<veces;i++){
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      const t0 = base + i*0.30;
+      o.type = 'sine'; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.25, t0+0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0+0.20);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t0); o.stop(t0+0.22);
+    }
+  }catch(e){}
+}
+
 function avisar30(){
+  bip(3);
   try{
     if(Notification.permission === 'granted'){
-      new Notification('Media hora corriendo', {body:'Llevás 30 minutos en esta tarea. Considerá pausar cuando termines el corte.'});
+      new Notification('Media hora corriendo', {body:'Llevás 30 minutos en esta tarea. Considerá pausar cuando termines.'});
     }
   }catch(e){}
 }
@@ -1231,6 +1265,7 @@ async function alternar(){
     clearInterval(reloj); reloj = null;
   }else{
     E.inicioBloque = Date.now();
+    desbloquearAudio();  // el gesto de Empezar habilita el sonido para esta sesión
     try{ if(Notification.permission === 'default') Notification.requestPermission(); }catch(e){}
     arrancarReloj();
   }
@@ -1868,7 +1903,25 @@ document.getElementById('s-guardar').onclick = async()=>{
 // si vuelve el internet, reintenta subir
 window.addEventListener('online', ()=>{ if(hayNube()) guardar(); });
 
+// A los 5 s de abrir, si faltan permisos de notificación, recordar activarlos.
+// No aparece si ya están concedidos, así no molesta todos los días.
+function recordarPermisos(){
+  setTimeout(()=>{
+    let permiso = 'denied';
+    try{ permiso = Notification.permission; }catch(e){}
+    if(permiso === 'granted') return;
+    if(document.getElementById('aviso-permiso')) return;
+    const b = document.createElement('div');
+    b.id = 'aviso-permiso';
+    b.className = 'aviso-permiso';
+    b.innerHTML = '<span>Para que el cronómetro te avise cada 30 min: activá las notificaciones (candado a la izquierda de la dirección → Notificaciones → Permitir) y dale <b>Empezar</b> para habilitar el sonido.</span><button id="cerrar-permiso">Entendido</button>';
+    document.body.appendChild(b);
+    document.getElementById('cerrar-permiso').onclick = ()=>b.remove();
+  }, 5000);
+}
+
 cargar();
+recordarPermisos();
 </script>
 </body>
 </html>
