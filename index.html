@@ -1467,8 +1467,8 @@ async function crearProyecto(){
     // En modo video, leer fases de p-fases-video
     const elegidas = new Set([...document.querySelectorAll('#p-fases-video input:checked')].map(i=>i.value));
     const fases = [
-      {fase:'Grabación', nom:'Grabación', min:60, energia:'alta'},
-      {fase:'Edición & Entrega', nom:'Edición & Entrega', min:135, energia:'alta'}
+      {fase:'Grabación', nom:'Grabación · Video {n}', min:60, energia:'alta'},
+      {fase:'Edición & Entrega', nom:'Edición & Entrega · Video {n}', min:135, energia:'alta'}
     ].filter(f => elegidas.has(f.fase));
     // Un video = una barra, todas agrupadas bajo el cliente. La cola pide un
     // video completo a la vez. Las fechas se reparten por cadencia (días elegidos).
@@ -1488,7 +1488,7 @@ async function crearProyecto(){
           .replace('de los {n}', 'del video '+(v+1))
           .replace('los {n} seguidos', 'el video '+(v+1))
           .replace('los {n}', 'el video '+(v+1))
-          .replace('{n}', '1');
+          .replace('{n}', v+1);
         E.tareas.push({
           id: 'c'+base+'-'+v+'-'+i,
           p: kv,
