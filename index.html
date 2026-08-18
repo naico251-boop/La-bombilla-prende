@@ -32,6 +32,11 @@
     --line:rgba(245,245,240,.10);
     --radius:3px;
   }
+  .dias{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 12px}
+  .dias label{display:flex;align-items:center;gap:5px;padding:5px 9px;border:1px solid var(--line);
+    border-radius:6px;cursor:pointer;font-family:'Archivo',sans-serif;font-size:12px;color:var(--muted)}
+  .dias label:has(input:checked){border-color:var(--orange);color:var(--alabaster);background:var(--teal-lift)}
+  .dias input{accent-color:var(--orange)}
   .aviso-permiso{position:fixed;left:16px;right:16px;bottom:16px;z-index:80;max-width:520px;margin:0 auto;
     background:var(--teal-lift);border:1px solid var(--orange);border-radius:8px;
     padding:12px 14px;display:flex;gap:12px;align-items:center;justify-content:space-between;
@@ -421,7 +426,27 @@
           <option value="cero">Desde cero — guion y rodaje</option>
         </select>
       </div>
-      <p class="nota">Se van a crear las fases una por una, para los <em id="p-eco">4</em> videos juntos. Nunca un video a la vez.</p>
+      <div class="fila">
+        <select id="p-modo">
+          <option value="fases">Por fases — todos los videos juntos</option>
+          <option value="video">Por video — uno completo a la vez (cadencia)</option>
+        </select>
+      </div>
+      <div id="p-cadencia" hidden>
+        <label class="nota">¿Qué días entregás?</label>
+        <div id="p-dias" class="dias">
+          <label><input type="checkbox" value="1"><span>Lun</span></label>
+          <label><input type="checkbox" value="2"><span>Mar</span></label>
+          <label><input type="checkbox" value="3"><span>Mié</span></label>
+          <label><input type="checkbox" value="4"><span>Jue</span></label>
+          <label><input type="checkbox" value="5"><span>Vie</span></label>
+          <label><input type="checkbox" value="6"><span>Sáb</span></label>
+          <label><input type="checkbox" value="0"><span>Dom</span></label>
+        </div>
+        <label class="nota" for="p-inicio">Arranca el</label>
+        <input id="p-inicio" type="date">
+      </div>
+      <p class="nota" id="p-nota">Se van a crear las fases una por una, para los <em id="p-eco">4</em> videos juntos. Nunca un video a la vez.</p>
       <div id="p-fases" class="fases"></div>
       <label class="nota" for="p-fecha">Fecha de entrega (opcional)</label>
       <input id="p-fecha" type="date">
@@ -1339,7 +1364,8 @@ function plantilla(){
 
 function pintarFases(){
   const n = Math.max(1, parseInt(document.getElementById('p-cant').value) || 1);
-  document.getElementById('p-eco').textContent = n;
+  const eco = document.getElementById('p-eco');
+  if(eco) eco.textContent = n;
   const marcadas = new Set(
     [...document.querySelectorAll('#p-fases input:checked')].map(i=>i.value)
   );
@@ -1355,6 +1381,27 @@ function pintarFases(){
   }).join('');
 }
 
+// Reparte fechas de entrega según cadencia: desde una fecha de inicio, va tomando
+// los días de la semana elegidos (0=Dom..6=Sáb) hasta juntar 'cantidad' fechas.
+function fechasCadencia(inicioStr, dias, cantidad){
+  const fechas = [];
+  const h = new Date();
+  let d = inicioStr ? new Date(inicioStr+'T00:00:00') : new Date(h.getFullYear(), h.getMonth(), h.getDate());
+  d = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const set = new Set(dias);
+  let guard = 0;
+  while(fechas.length < cantidad && guard < 3660){
+    if(set.has(d.getDay())){
+      const mm = String(d.getMonth()+1).padStart(2,'0');
+      const dd = String(d.getDate()).padStart(2,'0');
+      fechas.push(`${d.getFullYear()}-${mm}-${dd}`);
+    }
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate()+1);
+    guard++;
+  }
+  return fechas;
+}
+
 async function crearProyecto(){
   const cliente = document.getElementById('p-cli').value.trim();
   let nombre = document.getElementById('p-nom').value.trim();
@@ -1364,36 +1411,73 @@ async function crearProyecto(){
   const elegidas = new Set([...document.querySelectorAll('#p-fases input:checked')].map(i=>i.value));
   const fases = plantilla().filter(f => elegidas.has(f.fase));
   if(!fases.length) return;
-
-  const k = 'x' + Date.now();
+  const modo = document.getElementById('p-modo').value;
+  const base = Date.now();
   E.propios = E.propios || {};
-  E.propios[k] = {
-    nombre: `${nombre} (${n})`,
-    cliente: cliente || undefined,
-    color: COLORES[Object.keys(E.propios).length % COLORES.length]
-  };
 
-  fases.forEach((f,i)=>{
-    E.tareas.push({
-      id: 'c' + Date.now() + '-' + i,
-      p: k,
-      fase: f.fase,
-      nom: f.nom.replace('{n}', n),
-      min: Math.round(f.min * n),
-      energia: f.energia,
-      hecho: false
+  if(modo === 'video'){
+    // Un video = una barra, todas agrupadas bajo el cliente. La cola pide un
+    // video completo a la vez. Las fechas se reparten por cadencia (días elegidos).
+    const dias = [...document.querySelectorAll('#p-dias input:checked')].map(i=>parseInt(i.value));
+    const inicio = document.getElementById('p-inicio').value;
+    const fechas = dias.length ? fechasCadencia(inicio, dias, n) : [];
+    const grupo = cliente || nombre;
+    for(let v=0; v<n; v++){
+      const kv = 'v' + base + '-' + v;
+      E.propios[kv] = {
+        nombre: `${nombre} ${v+1}`,
+        cliente: grupo,
+        color: COLORES[Object.keys(E.propios).length % COLORES.length]
+      };
+      fases.forEach((f,i)=>{
+        const nomV = f.nom
+          .replace('de los {n}', 'del video '+(v+1))
+          .replace('los {n} seguidos', 'el video '+(v+1))
+          .replace('los {n}', 'el video '+(v+1))
+          .replace('{n}', '1');
+        E.tareas.push({
+          id: 'c'+base+'-'+v+'-'+i,
+          p: kv,
+          fase: f.fase,
+          nom: nomV,
+          min: Math.round(f.min),
+          energia: f.energia,
+          hecho: false
+        });
+      });
+      if(fechas[v]) E.entregas[kv] = fechas[v];
+    }
+  } else {
+    // Por fases: un solo proyecto con las fases para los N videos juntos.
+    const k = 'x' + base;
+    E.propios[k] = {
+      nombre: `${nombre} (${n})`,
+      cliente: cliente || undefined,
+      color: COLORES[Object.keys(E.propios).length % COLORES.length]
+    };
+    fases.forEach((f,i)=>{
+      E.tareas.push({
+        id: 'c' + base + '-' + i,
+        p: k,
+        fase: f.fase,
+        nom: f.nom.replace('{n}', n),
+        min: Math.round(f.min * n),
+        energia: f.energia,
+        hecho: false
+      });
     });
-  });
-
-  const fecha = document.getElementById('p-fecha').value;
-  if(fecha) E.entregas[k] = fecha;
+    const fecha = document.getElementById('p-fecha').value;
+    if(fecha) E.entregas[k] = fecha;
+  }
 
   document.getElementById('p-cli').value = '';
   document.getElementById('p-nom').value = '';
   document.getElementById('p-fecha').value = '';
+  document.querySelectorAll('#p-dias input:checked').forEach(i=>i.checked=false);
+  document.getElementById('p-inicio').value = '';
   document.getElementById('form').hidden = true;
   await guardar(); pintar();
-  avisoBreve('Proyecto agregado');
+  avisoBreve(modo === 'video' ? `${n} videos agregados` : 'Proyecto agregado');
 }
 
 // Dividir un proyecto de varios videos: saca M videos a un grupo aparte.
@@ -1538,6 +1622,19 @@ tabS.onclick = ()=>verTab(false);
 
 document.getElementById('p-cant').oninput = pintarFases;
 document.getElementById('p-estado').onchange = pintarFases;
+document.getElementById('p-modo').onchange = function(){
+  const video = this.value === 'video';
+  document.getElementById('p-cadencia').hidden = !video;
+  const nota = document.getElementById('p-nota');
+  if(video){
+    nota.textContent = 'Cada video se hace completo (montaje → acabado), uno a la vez, agrupados bajo el cliente. Las fechas se reparten según los días que marques.';
+    const inp = document.getElementById('p-inicio');
+    if(!inp.value){ const t = new Date(); inp.value = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`; }
+  } else {
+    const n = Math.max(1, parseInt(document.getElementById('p-cant').value)||1);
+    nota.innerHTML = 'Se van a crear las fases una por una, para los <em id="p-eco">'+n+'</em> videos juntos. Nunca un video a la vez.';
+  }
+};
 document.getElementById('p-crear').onclick = crearProyecto;
 pintarFases();
 
