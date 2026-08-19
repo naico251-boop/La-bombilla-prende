@@ -1488,7 +1488,7 @@ async function crearProyecto(){
           .replace('de los {n}', 'del video '+(v+1))
           .replace('los {n} seguidos', 'el video '+(v+1))
           .replace('los {n}', 'el video '+(v+1))
-          .replace('{n}', v+1);
+          .replace('{n}', String(v+1));
         E.tareas.push({
           id: 'c'+base+'-'+v+'-'+i,
           p: kv,
