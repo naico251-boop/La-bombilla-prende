@@ -1071,7 +1071,7 @@ function pintar(){
       <div class="toma" style="border-left-color:${pr.color}">
         <div class="proyecto">
           <span class="dot" style="background:${pr.color}"></span>
-          <span class="eyebrow">${pr.nombre} · ${faseTxt}</span>
+          <span class="eyebrow">${pr.nombre}${pr.cliente ? ' — ' + pr.cliente : ''} · ${faseTxt}</span>
         </div>
         <h1>${t.nom}</h1>
         <div class="detalle">Estimado: ${Math.round(t.min/60*10)/10} h · Energía ${t.energia}</div>
