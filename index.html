@@ -1102,7 +1102,7 @@ function pintar(){
     return `<div class="clip ${i===0?'activo':''}" data-id="${c.id}" role="button" tabindex="0"
       style="border-top-color:${i===0?pr.color:'var(--muted)'}">
       <div class="fase">${c.fase}</div>
-      <div class="nom">${c.nom}</div>
+      <div class="nom">${pr.cliente ? pr.cliente + ' — ' + c.nom : c.nom}</div>
       <div class="dur">${Math.round(c.min/60*10)/10}h</div>
     </div>`;
   }).join('') || `<div class="vacio" style="width:100%">Nada en cola.</div>`;
